@@ -525,6 +525,10 @@ export default function Dashboard() {
                   ? ' via deposit allocation'
                   : h.changed_by === 'auto'
                   ? ' (auto)'
+                  : h.changed_by === 'rollback'
+                  ? ' (rolled back)'
+                  : h.from_status === 'RETURNED' && h.to_status === 'PENDING'
+                  ? ' (re-presented)'
                   : ''
               return (
                 <div
@@ -537,7 +541,7 @@ export default function Dashboard() {
                   />
                   <p>
                     <span className="font-medium">{amount}</span> cheque to {partyName} marked{' '}
-                    {h.to_status.charAt(0) + h.to_status.slice(1).toLowerCase()}
+                    {STATUS_LABELS[h.to_status] ?? h.to_status}
                     {via} —{' '}
                     <span className="text-muted-foreground">{formatDateTime(h.created_at)}</span>
                   </p>
