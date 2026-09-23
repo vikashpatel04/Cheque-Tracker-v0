@@ -11,6 +11,7 @@ import {
 } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { supabase } from '@/lib/supabase'
+import { isLegacyRepresented } from '@/lib/chequeTags'
 import { toast } from 'sonner'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
@@ -100,7 +101,9 @@ export default function Dashboard() {
     return d >= today && d <= monthEnd
   })
 
-  const returnedCount = cheques.filter((c) => c.status === 'RETURNED').length
+  // Bounced cheques still waiting for a decision (re-present or write off).
+  // Old-style re-presented ones were settled through a separate entry.
+  const returnedCount = cheques.filter((c) => c.status === 'RETURNED' && !isLegacyRepresented(c)).length
 
   const overdueCount = useMemo(() => {
     const todayStr = format(today, 'yyyy-MM-dd')
@@ -268,7 +271,7 @@ export default function Dashboard() {
           {
             label: 'Returned',
             value: String(returnedCount),
-            sub: 'needs attention',
+            sub: returnedCount > 0 ? 're-present or write off' : 'none pending',
           },
         ].map(({ label, value, sub, tone }) => (
           <Card key={label} className={tone === 'danger' ? 'border-red-300/70' : ''}>

@@ -58,7 +58,7 @@ export function AllocationModal({ depositAmount, onClose, onConfirm }: Allocatio
       return
     }
     toast.success(
-      `${formatCurrency(depositAmount, currencySymbol)} deposited — ${selectedIds.length} cheque${selectedIds.length !== 1 ? 's' : ''} marked as Deposited`
+      `${formatCurrency(depositAmount, currencySymbol)} added — ${selectedIds.length} cheque${selectedIds.length !== 1 ? 's' : ''} marked as Deposited`
     )
     setSubmitting(false)
     onClose()
@@ -69,7 +69,7 @@ export function AllocationModal({ depositAmount, onClose, onConfirm }: Allocatio
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {formatCurrency(depositAmount, currencySymbol)} entered — here's how it covers your pending cheques
+            {formatCurrency(depositAmount, currencySymbol)} added — which pending cheques does it cover?
           </DialogTitle>
         </DialogHeader>
 

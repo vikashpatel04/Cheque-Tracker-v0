@@ -96,3 +96,18 @@ export const OVERDUE_TAG_CLASSES: Record<OverdueTag, string> = {
 export function replacementChequePath(chequeId: string) {
   return `/cheques?replace=${chequeId}`
 }
+
+/**
+ * Whether a cheque counts as a separate issued amount in totals. The old
+ * re-present flow created a second row for the same payment; the returned
+ * original is settled by that copy, so only the copy counts.
+ */
+export function countsAsIssued(cheque: Cheque): boolean {
+  return !isLegacyRepresented(cheque)
+}
+
+/** Amount we still have to pay: scheduled (pending/deposited) or bounced and not yet resolved. */
+export function isStillToPay(cheque: Cheque): boolean {
+  if (!countsAsIssued(cheque)) return false
+  return ['PENDING', 'DEPOSITED', 'RETURNED'].includes(cheque.status)
+}

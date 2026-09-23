@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { countsAsIssued } from '@/lib/chequeTags'
 import { ALL_STATUSES, STATUS_LABELS, type Party, type Cheque, type ChequeStatus } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
@@ -101,12 +102,14 @@ export function PartyDetail() {
 
   const filtered = statusFilter === 'ALL' ? cheques : cheques.filter((c) => c.status === statusFilter)
 
-  const totalIssued = cheques.reduce((s, c) => s + Number(c.amount), 0)
-  const totalCleared = cheques.filter((c) => c.status === 'PASSED').reduce((s, c) => s + Number(c.amount), 0)
-  const totalOutstanding = cheques
+  const issued = cheques.filter(countsAsIssued)
+  const totalIssued = issued.reduce((s, c) => s + Number(c.amount), 0)
+  const totalPaid = issued.filter((c) => c.status === 'PASSED').reduce((s, c) => s + Number(c.amount), 0)
+  const totalOutstanding = issued
     .filter((c) => ['PENDING', 'DEPOSITED'].includes(c.status))
     .reduce((s, c) => s + Number(c.amount), 0)
-  const totalReturned = cheques.filter((c) => c.status === 'RETURNED').reduce((s, c) => s + Number(c.amount), 0)
+  // Bounced and not yet re-presented or written off — still owed to the party.
+  const totalReturned = issued.filter((c) => c.status === 'RETURNED').reduce((s, c) => s + Number(c.amount), 0)
 
   return (
     <div className="space-y-6">
@@ -145,9 +148,9 @@ export function PartyDetail() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total Issued', value: totalIssued },
-          { label: 'Total Cleared', value: totalCleared },
+          { label: 'Paid', value: totalPaid },
           { label: 'Outstanding', value: totalOutstanding },
-          { label: 'Returned', value: totalReturned },
+          { label: 'Returned (still owed)', value: totalReturned },
         ].map(({ label, value }) => (
           <Card key={label}>
             <CardContent className="p-4">

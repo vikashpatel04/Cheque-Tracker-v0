@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import { addDays, format, startOfDay, subDays } from 'date-fns'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { countsAsIssued, isStillToPay } from '@/lib/chequeTags'
 import { useSettings } from '@/hooks/useSettings'
 import { useDeposits } from '@/hooks/useDeposits'
 import { CurrencyTooltip } from '@/components/shared/ChartTooltip'
@@ -39,21 +40,29 @@ export default function Reports() {
   const { currencySymbol } = useSettings()
   const { deposits } = useDeposits()
   const [cheques, setCheques] = useState<Cheque[]>([])
+  // Cheques that bounced at least once (from history), even if later
+  // re-presented and paid — their current status no longer says RETURNED.
+  const [everReturned, setEverReturned] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
     setLoading(true)
-    supabase
-      .from('cheques')
-      .select('*, party:parties(*)')
-      .is('deleted_at', null)
-      .then(({ data }) => {
-        if (data) setCheques(data as Cheque[])
-        setLoading(false)
-      })
+    Promise.all([
+      supabase.from('cheques').select('*, party:parties(*)').is('deleted_at', null),
+      supabase.from('cheque_history').select('cheque_id').eq('to_status', 'RETURNED'),
+    ]).then(([chequesRes, returnedRes]) => {
+      if (chequesRes.data) setCheques(chequesRes.data as Cheque[])
+      if (returnedRes.data) setEverReturned(new Set(returnedRes.data.map((h) => h.cheque_id as string)))
+      setLoading(false)
+    })
   }, [])
+
+  const wasReturned = useCallback(
+    (c: Cheque) => c.status === 'RETURNED' || everReturned.has(c.id),
+    [everReturned]
+  )
 
   const filtered = useMemo(() => {
     return cheques.filter((c) => {
@@ -64,14 +73,16 @@ export default function Reports() {
   }, [cheques, dateFrom, dateTo])
 
   const monthlyData = useMemo(() => {
-    const months: Record<string, { issued: number; cleared: number; returned: number; count: number }> = {}
+    const months: Record<string, { issued: number; paid: number; returned: number; stillToPay: number; count: number }> = {}
     filtered.forEach((c) => {
       const month = c.issue_date.slice(0, 7)
-      if (!months[month]) months[month] = { issued: 0, cleared: 0, returned: 0, count: 0 }
+      if (!months[month]) months[month] = { issued: 0, paid: 0, returned: 0, stillToPay: 0, count: 0 }
+      if (wasReturned(c)) months[month].returned += Number(c.amount)
+      if (!countsAsIssued(c)) return
       months[month].issued += Number(c.amount)
       months[month].count++
-      if (c.status === 'PASSED') months[month].cleared += Number(c.amount)
-      if (c.status === 'RETURNED') months[month].returned += Number(c.amount)
+      if (c.status === 'PASSED') months[month].paid += Number(c.amount)
+      if (isStillToPay(c)) months[month].stillToPay += Number(c.amount)
     })
     return Object.entries(months)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -79,28 +90,27 @@ export default function Reports() {
         month: formatMonthLabel(month),
         monthKey: month,
         ...data,
-        netFlow: data.cleared - data.returned,
       }))
-  }, [filtered])
+  }, [filtered, wasReturned])
 
   const partyData = useMemo(() => {
-    const parties: Record<string, { name: string; issued: number; cleared: number; returned: number; outstanding: number }> = {}
+    const parties: Record<string, { name: string; issued: number; paid: number; returned: number; stillToPay: number }> = {}
     filtered.forEach((c) => {
       const id = c.party_id
-      if (!parties[id]) parties[id] = { name: c.party?.name ?? 'Unknown', issued: 0, cleared: 0, returned: 0, outstanding: 0 }
+      if (!parties[id]) parties[id] = { name: c.party?.name ?? 'Unknown', issued: 0, paid: 0, returned: 0, stillToPay: 0 }
+      if (wasReturned(c)) parties[id].returned += Number(c.amount)
+      if (!countsAsIssued(c)) return
       parties[id].issued += Number(c.amount)
-      if (c.status === 'PASSED') parties[id].cleared += Number(c.amount)
-      if (c.status === 'RETURNED') parties[id].returned += Number(c.amount)
-      if (['PENDING', 'DEPOSITED'].includes(c.status)) parties[id].outstanding += Number(c.amount)
+      if (c.status === 'PASSED') parties[id].paid += Number(c.amount)
+      if (isStillToPay(c)) parties[id].stillToPay += Number(c.amount)
     })
-    return Object.values(parties).sort((a, b) => b.outstanding - a.outstanding)
-  }, [filtered])
+    return Object.values(parties).sort((a, b) => b.stillToPay - a.stillToPay)
+  }, [filtered, wasReturned])
 
   const topPartyChart = partyData.slice(0, 8).map((p) => ({
     name: p.name.length > 18 ? p.name.slice(0, 16) + '…' : p.name,
-    Outstanding: p.outstanding,
-    Cleared: p.cleared,
-    Returned: p.returned,
+    'Still to pay': p.stillToPay,
+    Paid: p.paid,
   }))
 
   const bankData = useMemo(() => {
@@ -165,14 +175,16 @@ export default function Reports() {
   }, [deposits, cheques])
 
   const summaryStats = useMemo(() => {
-    const totalIssued = filtered.reduce((s, c) => s + Number(c.amount), 0)
-    const totalCleared = filtered.filter((c) => c.status === 'PASSED').reduce((s, c) => s + Number(c.amount), 0)
-    const totalReturned = filtered.filter((c) => c.status === 'RETURNED').reduce((s, c) => s + Number(c.amount), 0)
-    const totalOutstanding = filtered
-      .filter((c) => ['PENDING', 'DEPOSITED'].includes(c.status))
-      .reduce((s, c) => s + Number(c.amount), 0)
-    return { totalIssued, totalCleared, totalReturned, totalOutstanding, count: filtered.length }
-  }, [filtered])
+    const issued = filtered.filter(countsAsIssued)
+    const sum = (list: Cheque[]) => list.reduce((s, c) => s + Number(c.amount), 0)
+    return {
+      totalIssued: sum(issued),
+      totalPaid: sum(issued.filter((c) => c.status === 'PASSED')),
+      totalStillToPay: sum(issued.filter(isStillToPay)),
+      totalReturned: sum(filtered.filter(wasReturned)),
+      count: issued.length,
+    }
+  }, [filtered, wasReturned])
 
   /**
    * 28-day rolling daily cash flow — 14 days back + 14 days forward.
@@ -294,9 +306,9 @@ export default function Reports() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
           { label: 'Total Issued', value: formatCurrency(summaryStats.totalIssued, currencySymbol) },
-          { label: 'Cleared', value: formatCurrency(summaryStats.totalCleared, currencySymbol) },
-          { label: 'Outstanding', value: formatCurrency(summaryStats.totalOutstanding, currencySymbol) },
-          { label: 'Returned', value: formatCurrency(summaryStats.totalReturned, currencySymbol) },
+          { label: 'Paid (cleared)', value: formatCurrency(summaryStats.totalPaid, currencySymbol) },
+          { label: 'Still to pay', value: formatCurrency(summaryStats.totalStillToPay, currencySymbol) },
+          { label: 'Returned (bounced)', value: formatCurrency(summaryStats.totalReturned, currencySymbol) },
           { label: 'Cheques', value: String(summaryStats.count) },
         ].map(({ label, value }) => (
           <Card key={label}>
@@ -427,7 +439,7 @@ export default function Reports() {
                     stroke="#22c55e"
                     strokeWidth={2}
                     dot={{ r: 3 }}
-                    name="Deposit Log"
+                    name="Funds Added"
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -452,7 +464,7 @@ export default function Reports() {
                     <TableHead className="p-3 text-right text-foreground">Pending</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Deposited</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Required</TableHead>
-                    <TableHead className="p-3 text-right text-foreground">Deposit Log</TableHead>
+                    <TableHead className="p-3 text-right text-foreground">Funds Added</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Gap</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -514,7 +526,7 @@ export default function Reports() {
             <Card>
               <CardHeader>
                 <CardTitle>Monthly Comparison</CardTitle>
-                <CardDescription>Issued, cleared, and returned by month</CardDescription>
+                <CardDescription>Cheques we issued, paid, and that bounced — by issue month</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={320}>
@@ -525,7 +537,7 @@ export default function Reports() {
                     <Tooltip content={<CurrencyTooltip currencySymbol={currencySymbol} />} />
                     <Legend />
                     <Bar dataKey="issued" fill="#3b82f6" name="Issued" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="cleared" fill="#22c55e" name="Cleared" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="paid" fill="#22c55e" name="Paid" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="returned" fill="#ef4444" name="Returned" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -534,8 +546,8 @@ export default function Reports() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Net Cash Flow</CardTitle>
-                <CardDescription>Cleared minus returned per month</CardDescription>
+                <CardTitle>Still to Pay</CardTitle>
+                <CardDescription>Amount from each month's cheques not yet paid (pending, deposited or returned)</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={320}>
@@ -545,7 +557,7 @@ export default function Reports() {
                     <YAxis tickFormatter={(v) => formatChartCurrency(v, currencySymbol)} tick={{ fontSize: 10 }} width={55} />
                     <Tooltip content={<CurrencyTooltip currencySymbol={currencySymbol} />} />
                     <Legend />
-                    <Area type="monotone" dataKey="netFlow" fill="#22c55e" stroke="#22c55e" fillOpacity={0.15} name="Net Flow" />
+                    <Area type="monotone" dataKey="stillToPay" fill="#f59e0b" stroke="#f59e0b" fillOpacity={0.15} name="Still to pay" />
                     <Line type="monotone" dataKey="issued" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Issued" />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -562,9 +574,9 @@ export default function Reports() {
                     <TableHead className="p-3 text-foreground">Month</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Cheques</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Issued</TableHead>
-                    <TableHead className="p-3 text-right text-foreground">Cleared</TableHead>
+                    <TableHead className="p-3 text-right text-foreground">Paid</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Returned</TableHead>
-                    <TableHead className="p-3 text-right text-foreground">Net Flow</TableHead>
+                    <TableHead className="p-3 text-right text-foreground">Still to pay</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -573,9 +585,9 @@ export default function Reports() {
                       <TableCell className="p-3 font-medium">{m.month}</TableCell>
                       <TableCell className="p-3 text-right">{m.count}</TableCell>
                       <TableCell className="p-3 text-right">{formatCurrency(m.issued, currencySymbol)}</TableCell>
-                      <TableCell className="p-3 text-right text-green-600">{formatCurrency(m.cleared, currencySymbol)}</TableCell>
+                      <TableCell className="p-3 text-right text-green-600">{formatCurrency(m.paid, currencySymbol)}</TableCell>
                       <TableCell className="p-3 text-right text-red-600">{formatCurrency(m.returned, currencySymbol)}</TableCell>
-                      <TableCell className="p-3 text-right">{formatCurrency(m.netFlow, currencySymbol)}</TableCell>
+                      <TableCell className="p-3 text-right">{formatCurrency(m.stillToPay, currencySymbol)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -588,7 +600,7 @@ export default function Reports() {
           <Card>
             <CardHeader>
               <CardTitle>Top Parties — Stacked Breakdown</CardTitle>
-              <CardDescription>Outstanding, cleared, and returned for top 8 parties</CardDescription>
+              <CardDescription>Still to pay and paid, for the 8 parties we owe most</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={360}>
@@ -598,9 +610,8 @@ export default function Reports() {
                   <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
                   <Tooltip content={<CurrencyTooltip currencySymbol={currencySymbol} />} />
                   <Legend />
-                  <Bar dataKey="Outstanding" stackId="a" fill={STATUS_COLORS.PENDING} radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="Cleared" stackId="a" fill={STATUS_COLORS.PASSED} />
-                  <Bar dataKey="Returned" stackId="a" fill={STATUS_COLORS.RETURNED} radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="Still to pay" stackId="a" fill={STATUS_COLORS.PENDING} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="Paid" stackId="a" fill={STATUS_COLORS.PASSED} radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -613,9 +624,9 @@ export default function Reports() {
                   <TableRow className="bg-muted/50">
                     <TableHead className="p-3 text-foreground">Party</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Issued</TableHead>
-                    <TableHead className="p-3 text-right text-foreground">Cleared</TableHead>
+                    <TableHead className="p-3 text-right text-foreground">Paid</TableHead>
                     <TableHead className="p-3 text-right text-foreground">Returned</TableHead>
-                    <TableHead className="p-3 text-right text-foreground">Outstanding</TableHead>
+                    <TableHead className="p-3 text-right text-foreground">Still to pay</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -623,9 +634,9 @@ export default function Reports() {
                     <TableRow key={p.name}>
                       <TableCell className="p-3 font-medium">{p.name}</TableCell>
                       <TableCell className="p-3 text-right">{formatCurrency(p.issued, currencySymbol)}</TableCell>
-                      <TableCell className="p-3 text-right">{formatCurrency(p.cleared, currencySymbol)}</TableCell>
+                      <TableCell className="p-3 text-right">{formatCurrency(p.paid, currencySymbol)}</TableCell>
                       <TableCell className="p-3 text-right">{formatCurrency(p.returned, currencySymbol)}</TableCell>
-                      <TableCell className="p-3 text-right font-medium">{formatCurrency(p.outstanding, currencySymbol)}</TableCell>
+                      <TableCell className="p-3 text-right font-medium">{formatCurrency(p.stillToPay, currencySymbol)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -678,8 +689,8 @@ export default function Reports() {
         <TabsContent value="deposits" className="space-y-4 mt-4">
           <Card>
             <CardHeader>
-              <CardTitle>Deposits vs Cheque Outflow</CardTitle>
-              <CardDescription>Daily bank deposits compared to cleared/deposited cheque amounts</CardDescription>
+              <CardTitle>Funds Added vs Cheque Payments</CardTitle>
+              <CardDescription>Money we added to the bank compared to our cheques deposited/paid</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={320}>
@@ -689,10 +700,10 @@ export default function Reports() {
                   <YAxis tickFormatter={(v) => formatChartCurrency(v, currencySymbol)} tick={{ fontSize: 10 }} width={55} />
                   <Tooltip content={<CurrencyTooltip currencySymbol={currencySymbol} />} />
                   <Legend />
-                  <Bar dataKey="deposits" fill="#22c55e" name="Deposits" barSize={8} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="outflow" fill="#f59e0b" name="Outflow" barSize={8} radius={[2, 2, 0, 0]} />
-                  <Line type="monotone" dataKey="cumDeposits" stroke="#16a34a" strokeWidth={2} dot={false} name="Cum. Deposits" />
-                  <Line type="monotone" dataKey="cumOutflow" stroke="#d97706" strokeWidth={2} dot={false} name="Cum. Outflow" />
+                  <Bar dataKey="deposits" fill="#22c55e" name="Funds added" barSize={8} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="outflow" fill="#f59e0b" name="Cheque payments" barSize={8} radius={[2, 2, 0, 0]} />
+                  <Line type="monotone" dataKey="cumDeposits" stroke="#16a34a" strokeWidth={2} dot={false} name="Cum. funds added" />
+                  <Line type="monotone" dataKey="cumOutflow" stroke="#d97706" strokeWidth={2} dot={false} name="Cum. payments" />
                 </ComposedChart>
               </ResponsiveContainer>
             </CardContent>
@@ -700,8 +711,8 @@ export default function Reports() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Deposit Trend</CardTitle>
-              <CardDescription>Daily deposit amounts over time</CardDescription>
+              <CardTitle>Funds Added Trend</CardTitle>
+              <CardDescription>Money added to the bank to cover cheques, over time</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={260}>
@@ -710,7 +721,7 @@ export default function Reports() {
                   <XAxis dataKey="date" tick={{ fontSize: 9 }} interval={6} />
                   <YAxis tickFormatter={(v) => formatChartCurrency(v, currencySymbol)} tick={{ fontSize: 10 }} width={55} />
                   <Tooltip content={<CurrencyTooltip currencySymbol={currencySymbol} />} />
-                  <Area type="monotone" dataKey="deposits" fill="#22c55e" stroke="#22c55e" fillOpacity={0.2} name="Deposits" />
+                  <Area type="monotone" dataKey="deposits" fill="#22c55e" stroke="#22c55e" fillOpacity={0.2} name="Funds added" />
                   <Line type="monotone" dataKey="deposits" stroke="#22c55e" strokeWidth={2} dot={{ r: 2 }} />
                 </ComposedChart>
               </ResponsiveContainer>
