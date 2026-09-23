@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useParties } from '@/hooks/useParties'
 import { useCheques } from '@/hooks/useCheques'
 import { formatCurrency } from '@/lib/formatters'
+import { toast } from 'sonner'
 import { useSettings } from '@/hooks/useSettings'
 import { cn } from '@/lib/utils'
 import { PartyForm } from './PartyForm'
@@ -208,7 +209,7 @@ export function PartyList() {
         open={formOpen}
         onOpenChange={setFormOpen}
         onSubmit={async (data) => {
-          await createParty({
+          const { error } = await createParty({
             name: data.name,
             contact_name: data.contact_name || null,
             phone: data.phone || null,
@@ -216,6 +217,11 @@ export function PartyList() {
             notes: data.notes || null,
             is_active: true,
           })
+          if (error) {
+            toast.error(`Failed to add party: ${error}`)
+            return false
+          }
+          toast.success('Party added')
         }}
       />
 

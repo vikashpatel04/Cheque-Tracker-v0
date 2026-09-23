@@ -36,7 +36,8 @@ interface PartyFormProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   party?: Party | null
-  onSubmit: (data: PartyFormData) => Promise<void>
+  /** Return false when saving failed (caller shows the error) to keep the form open. */
+  onSubmit: (data: PartyFormData) => Promise<boolean | void>
   onDelete?: () => Promise<void>
 }
 
@@ -60,7 +61,8 @@ export function PartyForm({ open, onOpenChange, party, onSubmit, onDelete }: Par
   const isActive = watch('is_active')
 
   const handleFormSubmit = async (data: PartyFormData) => {
-    await onSubmit(data)
+    const saved = await onSubmit(data)
+    if (saved === false) return
     reset()
     onOpenChange(false)
   }

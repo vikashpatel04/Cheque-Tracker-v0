@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase'
 import type { Cheque, ChequeStatus } from '@/types'
 import { VALID_STATUS_TRANSITIONS } from '@/types'
 import { useState, useEffect, useMemo } from 'react'
+import { toast } from 'sonner'
 
 const chequeSchema = z.object({
   party_id: z.string().min(1, 'Party is required'),
@@ -34,7 +35,8 @@ interface ChequeFormProps {
   onOpenChange: (open: boolean) => void
   cheque?: Cheque | null
   prefill?: Partial<ChequeFormData>
-  onSubmit: (data: ChequeFormData) => Promise<void>
+  /** Return false when saving failed (caller shows the error) to keep the form open. */
+  onSubmit: (data: ChequeFormData) => Promise<boolean | void>
   onStatusChange?: () => void
 }
 
@@ -105,16 +107,25 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
   const validTransitions = cheque ? VALID_STATUS_TRANSITIONS[cheque.status] : []
 
   const handleFormSubmit = async (data: ChequeFormData) => {
-    if (cheque && newStatus && newStatus !== cheque.status) {
-      if (newStatus === 'RETURNED' && !returnReason.trim()) return
+    const statusChanging = cheque && newStatus && newStatus !== cheque.status
+    if (statusChanging && newStatus === 'RETURNED' && !returnReason.trim()) return
+
+    // Save the field edits first so a failed save never leaves a half-applied
+    // status change behind.
+    const saved = await onSubmit(data)
+    if (saved === false) return
+
+    if (cheque && statusChanging) {
       const result = await updateChequeStatus(cheque.id, newStatus, {
         changedBy: 'manual',
         returnReason: newStatus === 'RETURNED' ? returnReason : undefined,
       })
-      if (!result.success) return
+      if (!result.success) {
+        toast.error(`Cheque saved, but status change failed: ${result.error ?? 'unknown error'}`)
+        return
+      }
       onStatusChange?.()
     }
-    await onSubmit(data)
     onOpenChange(false)
   }
 

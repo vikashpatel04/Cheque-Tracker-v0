@@ -11,6 +11,7 @@ import {
 } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { supabase } from '@/lib/supabase'
+import { toast } from 'sonner'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
 
@@ -568,7 +569,12 @@ export default function Dashboard() {
         cheque={editCheque}
         onSubmit={async (data) => {
           if (!editCheque) return
-          await supabase.from('cheques').update(data).eq('id', editCheque.id)
+          const { error } = await supabase.from('cheques').update(data).eq('id', editCheque.id)
+          if (error) {
+            toast.error(`Failed to save cheque: ${error.message}`)
+            return false
+          }
+          toast.success('Cheque updated')
           loadDashboardData()
         }}
         onStatusChange={loadDashboardData}

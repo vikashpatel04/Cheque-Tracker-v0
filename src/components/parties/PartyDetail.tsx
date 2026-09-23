@@ -216,7 +216,7 @@ export function PartyDetail() {
           })
           if (result.error) {
             toast.error(result.error)
-            return
+            return false
           }
           toast.success('Party updated')
           setParty({ ...party, ...data, contact_name: data.contact_name || null, phone: data.phone || null, bank_name: data.bank_name || null, notes: data.notes || null })

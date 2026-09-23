@@ -28,6 +28,7 @@ import { ChequeBulkUpload } from './BulkUpload'
 import { useChequeStatusActions, STATUS_ACTION_META, canChainDepositedAndPassed } from './StatusActions'
 import type { Cheque, ChequeStatus } from '@/types'
 import { VALID_STATUS_TRANSITIONS } from '@/types'
+import { toast } from 'sonner'
 
 const ALL_STATUSES: ChequeStatus[] = ['PENDING', 'DEPOSITED', 'PASSED', 'RETURNED', 'CANCELLED']
 
@@ -264,12 +265,14 @@ export function ChequeList() {
         onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditCheque(null) } }}
         cheque={editCheque}
         onSubmit={async (data) => {
-          if (editCheque) {
-            await updateCheque(editCheque.id, data)
-          } else {
-            await createCheque(data)
+          const { error } = editCheque
+            ? await updateCheque(editCheque.id, data)
+            : await createCheque(data)
+          if (error) {
+            toast.error(`Failed to save cheque: ${error}`)
+            return false
           }
-          fetchCheques()
+          toast.success(editCheque ? 'Cheque updated' : 'Cheque added')
         }}
         onStatusChange={fetchCheques}
       />
