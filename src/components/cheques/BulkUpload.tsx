@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { downloadChequeTemplate, parseExcelFile } from '@/lib/exportUtils'
 import { useParties } from '@/hooks/useParties'
-import { useCheques } from '@/hooks/useCheques'
+import { supabase } from '@/lib/supabase'
 import { parseFlexibleDate, toISODate } from '@/lib/formatters'
 import { toast } from 'sonner'
 
@@ -30,7 +30,6 @@ interface PreviewRow {
 
 export function ChequeBulkUpload({ open, onOpenChange, onComplete }: BulkUploadProps) {
   const { parties } = useParties()
-  const { createCheque } = useCheques()
   const [preview, setPreview] = useState<PreviewRow[]>([])
   const [step, setStep] = useState<'upload' | 'preview'>('upload')
   const [submitting, setSubmitting] = useState(false)
@@ -83,23 +82,36 @@ export function ChequeBulkUpload({ open, onOpenChange, onComplete }: BulkUploadP
   }
 
   const handleConfirm = async () => {
-    setSubmitting(true)
     const valid = preview.filter((r) => !r.error && r.party_id)
-    let inserted = 0
-    for (const row of valid) {
-      const result = await createCheque({
+    if (valid.length === 0) return
+    setSubmitting(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setSubmitting(false)
+      toast.error('Not authenticated')
+      return
+    }
+    // One request for all rows: the import either fully succeeds or saves
+    // nothing, so it can be retried without creating duplicates.
+    const { error } = await supabase.from('cheques').insert(
+      valid.map((row) => ({
+        user_id: user.id,
+        status: 'PENDING',
         party_id: row.party_id!,
         cheque_number: row.cheque_number,
         bank_name: row.bank_name,
         amount: row.amount,
         issue_date: row.issue_date,
         due_date: row.due_date,
-        notes: row.notes || undefined,
-      })
-      if (!result.error) inserted++
-    }
-    toast.success(`${inserted} cheques imported`)
+        notes: row.notes || null,
+      }))
+    )
     setSubmitting(false)
+    if (error) {
+      toast.error(`Import failed, nothing was saved: ${error.message}`)
+      return
+    }
+    toast.success(`${valid.length} cheques imported`)
     setStep('upload')
     setPreview([])
     onComplete()
@@ -150,7 +162,7 @@ export function ChequeBulkUpload({ open, onOpenChange, onComplete }: BulkUploadP
             </Table>
             <DialogFooter>
               <Button variant="outline" onClick={() => setStep('upload')}>Back</Button>
-              <Button onClick={handleConfirm} disabled={submitting}>
+              <Button onClick={handleConfirm} disabled={submitting || preview.every((r) => r.error)}>
                 Import {preview.filter((r) => !r.error).length} Cheques
               </Button>
             </DialogFooter>
