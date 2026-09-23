@@ -1,77 +1,49 @@
 import { supabase } from './supabase'
 import type { ChequeStatus, UpdateChequeStatusOptions } from '@/types'
 
+/**
+ * Change a cheque's status via the change_cheque_status database function,
+ * which validates the transition, updates the cheque, and writes the history
+ * row in a single transaction.
+ */
 export async function updateChequeStatus(
   chequeId: string,
   newStatus: ChequeStatus,
   options: UpdateChequeStatusOptions
 ): Promise<{ success: boolean; error?: string }> {
-  const { data: cheque, error: fetchError } = await supabase
-    .from('cheques')
-    .select('status, return_reason')
-    .eq('id', chequeId)
-    .is('deleted_at', null)
-    .single()
-
-  if (fetchError || !cheque) {
-    return { success: false, error: fetchError?.message ?? 'Cheque not found' }
-  }
-
-  const fromStatus = cheque.status as ChequeStatus
-
-  if (fromStatus === newStatus) {
-    return { success: true }
-  }
-
-  const updatePayload: Record<string, unknown> = {
-    status: newStatus,
-    updated_at: new Date().toISOString(),
-  }
-
-  if (options.changedBy === 'manual' || options.changedBy === 'deposit_allocation') {
-    updatePayload.auto_transition_blocked = true
-  }
-
-  if (newStatus === 'RETURNED' && options.returnReason) {
-    updatePayload.return_reason = options.returnReason
-  }
-
-  const { error: updateError } = await supabase
-    .from('cheques')
-    .update(updatePayload)
-    .eq('id', chequeId)
-
-  if (updateError) {
-    return { success: false, error: updateError.message }
-  }
-
-  const { error: historyError } = await supabase.from('cheque_history').insert({
-    cheque_id: chequeId,
-    from_status: fromStatus,
-    to_status: newStatus,
-    changed_by: options.changedBy,
-    note: options.note ?? null,
+  const { error } = await supabase.rpc('change_cheque_status', {
+    p_cheque_id: chequeId,
+    p_new_status: newStatus,
+    p_changed_by: options.changedBy,
+    p_note: options.note ?? null,
+    p_return_reason: newStatus === 'RETURNED' ? options.returnReason ?? null : null,
   })
 
-  if (historyError) {
-    return { success: false, error: historyError.message }
+  if (error) {
+    return { success: false, error: error.message }
   }
-
   return { success: true }
 }
 
-export async function updateChequeStatusBatch(
+/**
+ * Record a bank deposit and mark the allocated cheques DEPOSITED in one
+ * transaction — either all of it is saved or none of it is.
+ */
+export async function recordDeposit(
+  amount: number,
+  depositDate: string,
   chequeIds: string[],
-  newStatus: ChequeStatus,
-  options: UpdateChequeStatusOptions
-): Promise<{ success: boolean; error?: string; count: number }> {
-  let count = 0
-  for (const id of chequeIds) {
-    const result = await updateChequeStatus(id, newStatus, options)
-    if (!result.success) {
-      return { success: false, error: result.error, count }
-    }
-    count++
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('record_deposit', {
+    p_amount: amount,
+    p_deposit_date: depositDate,
+    p_cheque_ids: chequeIds,
+    p_notes: notes ?? null,
+  })
+
+  if (error) {
+    return { success: false, error: error.message }
   }
-  return { success: true, count }
+  return { success: true }
 }

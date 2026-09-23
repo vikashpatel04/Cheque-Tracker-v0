@@ -7,18 +7,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { suggestAllocation, getRemainingBalance, type AllocationItem } from '@/lib/allocationEngine'
-import { updateChequeStatusBatch } from '@/lib/updateChequeStatus'
 import { useSettings } from '@/hooks/useSettings'
 import type { Cheque, Party } from '@/types'
 
 interface AllocationModalProps {
   depositAmount: number
-  notes?: string
   onClose: () => void
-  onComplete: (selectedIds: string[]) => Promise<string[]>
+  /** Save the deposit with the selected cheques. Returns an error message on failure. */
+  onConfirm: (selectedIds: string[]) => Promise<{ error?: string }>
 }
 
-export function AllocationModal({ depositAmount, notes, onClose, onComplete }: AllocationModalProps) {
+export function AllocationModal({ depositAmount, onClose, onConfirm }: AllocationModalProps) {
   const { currencySymbol, allocationSort } = useSettings()
   const [items, setItems] = useState<AllocationItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -52,18 +51,12 @@ export function AllocationModal({ depositAmount, notes, onClose, onComplete }: A
 
   const handleConfirm = async () => {
     setSubmitting(true)
-    if (selectedIds.length > 0) {
-      const result = await updateChequeStatusBatch(selectedIds, 'DEPOSITED', {
-        changedBy: 'deposit_allocation',
-        note: notes ? `Deposit allocation: ${notes}` : 'Deposit allocation',
-      })
-      if (!result.success) {
-        toast.error(result.error ?? 'Failed to update cheques')
-        setSubmitting(false)
-        return
-      }
+    const { error } = await onConfirm(selectedIds)
+    if (error) {
+      toast.error(`Deposit not saved: ${error}`)
+      setSubmitting(false)
+      return
     }
-    await onComplete(selectedIds)
     toast.success(
       `${formatCurrency(depositAmount, currencySymbol)} deposited — ${selectedIds.length} cheque${selectedIds.length !== 1 ? 's' : ''} marked as Deposited`
     )

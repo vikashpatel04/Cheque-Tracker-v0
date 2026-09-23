@@ -27,13 +27,13 @@ export function DepositWidget() {
     setShowAllocation(true)
   }
 
-  const handleAllocationComplete = async (selectedIds: string[]) => {
-    await addDeposit(pendingAmount, notes || undefined)
-    setShowAllocation(false)
+  const handleAllocationConfirm = async (selectedIds: string[]) => {
+    const result = await addDeposit(pendingAmount, selectedIds, notes || undefined)
+    if (result.error) return result
     setAmount('')
     setNotes('')
     setPendingAmount(0)
-    return selectedIds
+    return {}
   }
 
   return (
@@ -84,9 +84,8 @@ export function DepositWidget() {
       {showAllocation && (
         <AllocationModal
           depositAmount={pendingAmount}
-          notes={notes}
           onClose={() => setShowAllocation(false)}
-          onComplete={handleAllocationComplete}
+          onConfirm={handleAllocationConfirm}
         />
       )}
     </>
