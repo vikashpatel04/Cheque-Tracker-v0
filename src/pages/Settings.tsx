@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Plus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -24,7 +24,7 @@ import type { AllocationSort } from '@/types'
 import { toast } from 'sonner'
 
 export default function SettingsPage() {
-  const { settings, updateSettings } = useSettings()
+  const { settings, loading, updateSettings } = useSettings()
   const [autoPassEnabled, setAutoPassEnabled] = useState(settings?.auto_pass_enabled ?? false)
   const [autoPassTime, setAutoPassTime] = useState(settings?.auto_pass_time?.slice(0, 5) ?? '23:59')
   const [allocationSort, setAllocationSort] = useState<AllocationSort>(settings?.allocation_sort ?? 'due_date_asc')
@@ -34,7 +34,20 @@ export default function SettingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Settings load asynchronously, so the form's initial state above is only a
+  // placeholder. Sync it once the saved values arrive — otherwise saving
+  // would overwrite the user's real settings (e.g. an empty bank list).
+  useEffect(() => {
+    if (!settings) return
+    setAutoPassEnabled(settings.auto_pass_enabled ?? false)
+    setAutoPassTime(settings.auto_pass_time?.slice(0, 5) ?? '23:59')
+    setAllocationSort(settings.allocation_sort ?? 'due_date_asc')
+    setCurrency(settings.currency_symbol ?? '₹')
+    setBanksList(settings.banks ?? [])
+  }, [settings])
+
   const handleSave = async () => {
+    if (!settings) return
     setSaving(true)
     const result = await updateSettings({
       auto_pass_enabled: autoPassEnabled,
@@ -74,8 +87,10 @@ export default function SettingsPage() {
   const handleDeleteAll = async () => {
     if (deleteConfirm !== 'DELETE MY DATA') return
     const now = new Date().toISOString()
-    await supabase.from('cheques').update({ deleted_at: now }).is('deleted_at', null)
-    await supabase.from('parties').update({ deleted_at: now }).is('deleted_at', null)
+    const { error: chequesError } = await supabase.from('cheques').update({ deleted_at: now }).is('deleted_at', null)
+    if (chequesError) { toast.error(chequesError.message); return }
+    const { error: partiesError } = await supabase.from('parties').update({ deleted_at: now }).is('deleted_at', null)
+    if (partiesError) { toast.error(partiesError.message); return }
     toast.success('All data deleted')
     setDeleteConfirm('')
   }
@@ -175,7 +190,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <Button onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving || loading || !settings}>
             {saving ? 'Saving...' : 'Save Settings'}
           </Button>
         </CardContent>

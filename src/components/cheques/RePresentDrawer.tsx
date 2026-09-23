@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react'
+import { addMonths, format, parseISO } from 'date-fns'
+import { ChevronDown } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Input } from '@/components/ui/input'
-import { DatePicker } from '@/components/ui/date-picker'
+import { DateInput } from '@/components/ui/date-picker'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
-import { supabase } from '@/lib/supabase'
-import { todayISO } from '@/lib/formatters'
-import { formatCurrency, formatDate } from '@/lib/formatters'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { representCheque } from '@/lib/updateChequeStatus'
+import { todayISO, formatCurrency, formatDate } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
 import { toast } from 'sonner'
 import type { Cheque } from '@/types'
@@ -19,119 +25,96 @@ interface RePresentDrawerProps {
   onSuccess: () => void
 }
 
+/**
+ * Re-present a returned cheque: the party deposits the SAME cheque again.
+ * It goes back to Pending with the new expected date (or straight to
+ * Deposited) and then follows the normal life cycle.
+ */
 export function RePresentDrawer({ cheque, open, onOpenChange, onSuccess }: RePresentDrawerProps) {
   const { currencySymbol } = useSettings()
-  const [newChequeNumber, setNewChequeNumber] = useState('')
   const [newDueDate, setNewDueDate] = useState('')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [errors, setErrors] = useState<{ cheque_number?: string; due_date?: string }>({})
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open && cheque) {
-      setNewChequeNumber('')
       setNewDueDate(todayISO())
       setNotes('')
-      setErrors({})
+      setError(null)
     }
   }, [open, cheque])
 
-  const validate = () => {
-    const e: typeof errors = {}
-    if (!newChequeNumber.trim()) e.cheque_number = 'Cheque number is required'
-    if (!newDueDate) e.due_date = 'Due date is required'
-    setErrors(e)
-    return Object.keys(e).length === 0
-  }
+  if (!cheque) return null
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!cheque || !validate()) return
+  // Cheques are valid for 3 months from the date written on them.
+  const chequeDate = cheque.original_due_date ?? cheque.due_date
+  const validTill = format(addMonths(parseISO(chequeDate), 3), 'yyyy-MM-dd')
+  const pastValidity = !!newDueDate && newDueDate > validTill
+
+  const save = async (markDeposited: boolean) => {
+    if (!newDueDate) {
+      setError('Due date is required')
+      return
+    }
     setSubmitting(true)
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      toast.error('Not authenticated')
-      setSubmitting(false)
-      return
-    }
-
-    const newNotes = ['[FROM_RETURN]', notes.trim()].filter(Boolean).join('\n')
-
-    const { error: insertError } = await supabase.from('cheques').insert({
-      user_id: user.id,
-      party_id: cheque.party_id,
-      cheque_number: newChequeNumber.trim(),
-      bank_name: cheque.bank_name,
-      amount: Number(cheque.amount),
-      issue_date: todayISO(),
-      due_date: newDueDate,
-      status: 'PENDING',
-      notes: newNotes,
+    const result = await representCheque(cheque.id, newDueDate, {
+      note: notes.trim() || undefined,
+      markDeposited,
     })
-
-    if (insertError) {
-      toast.error('Failed to create re-presented cheque')
-      setSubmitting(false)
+    setSubmitting(false)
+    if (!result.success) {
+      toast.error(`Failed to re-present: ${result.error}`)
       return
     }
-
-    const existingNotes = cheque.notes ?? ''
-    const updatedNotes = existingNotes.includes('[RE_PRESENTED]')
-      ? existingNotes
-      : ['[RE_PRESENTED]', existingNotes].filter(Boolean).join('\n')
-
-    await supabase.from('cheques').update({ notes: updatedNotes }).eq('id', cheque.id)
-
-    toast.success('Cheque re-presented successfully')
-    setSubmitting(false)
+    toast.success(
+      markDeposited
+        ? `Cheque #${cheque.cheque_number} re-presented and marked Deposited`
+        : `Cheque #${cheque.cheque_number} re-presented — due ${formatDate(newDueDate)}`
+    )
     onOpenChange(false)
     onSuccess()
   }
-
-  if (!cheque) return null
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>Re-present Cheque</SheetTitle>
+          <SheetTitle>Re-present Cheque #{cheque.cheque_number}</SheetTitle>
         </SheetHeader>
 
-        {/* Original cheque info — read-only */}
+        {/* Returned cheque info — read-only */}
         <div className="mt-6 rounded-lg border bg-muted/40 p-4 space-y-1 text-sm">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-2">Original cheque</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-2">Returned cheque</p>
           <p><span className="text-muted-foreground">Party:</span> <span className="font-medium">{cheque.party?.name}</span></p>
           <p><span className="text-muted-foreground">Bank:</span> {cheque.bank_name}</p>
           <p><span className="text-muted-foreground">Amount:</span> <span className="font-semibold">{formatCurrency(Number(cheque.amount), currencySymbol)}</span></p>
-          <p><span className="text-muted-foreground">Original due:</span> {formatDate(cheque.due_date)}</p>
+          <p><span className="text-muted-foreground">Cheque date:</span> {formatDate(chequeDate)}</p>
+          {cheque.original_due_date && cheque.original_due_date !== cheque.due_date && (
+            <p><span className="text-muted-foreground">Last presented for:</span> {formatDate(cheque.due_date)}</p>
+          )}
           {cheque.return_reason && (
             <p><span className="text-muted-foreground">Return reason:</span> <span className="text-destructive">{cheque.return_reason}</span></p>
           )}
+          {cheque.represent_count > 0 && (
+            <p><span className="text-muted-foreground">Re-presented before:</span> {cheque.represent_count}×</p>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <form
+          onSubmit={(e) => { e.preventDefault(); void save(false) }}
+          className="mt-6 space-y-4"
+        >
           <div>
-            <Label htmlFor="rp-cheque-number">New Cheque Number *</Label>
-            <Input
-              id="rp-cheque-number"
-              value={newChequeNumber}
-              onChange={(e) => setNewChequeNumber(e.target.value)}
-              placeholder="Enter new cheque number"
-              autoFocus
-            />
-            {errors.cheque_number && <p className="text-sm text-destructive mt-1">{errors.cheque_number}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor="rp-due-date">New Due Date *</Label>
-            <DatePicker
-              id="rp-due-date"
-              value={newDueDate}
-              onChange={setNewDueDate}
-              placeholder="Pick a due date"
-            />
-            {errors.due_date && <p className="text-sm text-destructive mt-1">{errors.due_date}</p>}
+            <Label htmlFor="rp-due-date">New due date *</Label>
+            <DateInput id="rp-due-date" value={newDueDate} onChange={setNewDueDate} />
+            <p className="text-xs text-muted-foreground mt-1">When the party will deposit this cheque again.</p>
+            {error && <p className="text-sm text-destructive mt-1">{error}</p>}
+            {pastValidity && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                This is after {formatDate(validTill)} — more than 3 months from the cheque date. The bank may refuse a stale cheque.
+              </p>
+            )}
           </div>
 
           <div>
@@ -140,13 +123,14 @@ export function RePresentDrawer({ cheque, open, onOpenChange, onSuccess }: RePre
               id="rp-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes for the re-presented cheque..."
+              placeholder="e.g. Funds arranged, party informed..."
               rows={2}
             />
           </div>
 
           <p className="text-xs text-muted-foreground">
-            A new PENDING cheque will be created with the same party, bank, and amount. The original returned cheque will be tagged as re-presented.
+            The same cheque goes back to <span className="font-medium">Pending</span> with the new date and follows the
+            normal cycle. Its return details stay in the history.
           </p>
 
           <div className="flex gap-2 pt-2">
@@ -159,9 +143,31 @@ export function RePresentDrawer({ cheque, open, onOpenChange, onSuccess }: RePre
             >
               Cancel
             </Button>
-            <Button type="submit" className="flex-1" disabled={submitting}>
-              {submitting ? 'Creating...' : 'Re-present'}
-            </Button>
+            <div className="flex flex-1">
+              <Button type="submit" className="flex-1 rounded-r-none" disabled={submitting}>
+                {submitting ? 'Saving...' : 'Save'}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    disabled={submitting}
+                    aria-label="More save options"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => void save(false)}>
+                    Save (Pending)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void save(true)}>
+                    Save as Deposited
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </form>
       </SheetContent>

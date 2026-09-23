@@ -1,5 +1,6 @@
 import { differenceInDays, parseISO, startOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { CLOSED_STATUSES } from '@/types'
 
 interface DaysUntilDueProps {
   dueDate: string
@@ -9,7 +10,7 @@ interface DaysUntilDueProps {
 
 export function DaysUntilDue({ dueDate, status, className }: DaysUntilDueProps) {
   // Terminal statuses — the cheque's outcome is already decided.
-  if (status === 'PASSED' || status === 'RETURNED' || status === 'CANCELLED') {
+  if ((CLOSED_STATUSES as string[]).includes(status)) {
     return <span className={cn('text-sm text-muted-foreground', className)}>—</span>
   }
 

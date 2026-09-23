@@ -6,9 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
+import { DateInput } from '@/components/ui/date-picker'
+import { useExistingChequeNumbers, describeExisting } from '@/hooks/useExistingChequeNumbers'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
-import { useCheques } from '@/hooks/useCheques'
 import { todayISO, formatAmountInput, parseAmount, nextChequeNumber } from '@/lib/formatters'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -30,9 +31,12 @@ export default function BulkAdd() {
   const isPartyWise = Boolean(partyId)
 
   const { parties } = useParties()
-  const { banks } = useSettings()
-  const { createCheque } = useCheques()
-  
+  // `banks` falls back to a built-in list while settings load; only use the
+  // user's saved list for defaults so rows don't get the wrong bank.
+  const { settings } = useSettings()
+  const savedBanks = settings?.banks
+  const banks = savedBanks ?? []
+
   const [rows, setRows] = useState<BulkRow[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -41,6 +45,7 @@ export default function BulkAdd() {
 
   useEffect(() => {
     // Fetch last cheque number from DB to seed the first row
+    let cancelled = false
     supabase
       .from('cheques')
       .select('cheque_number')
@@ -49,24 +54,27 @@ export default function BulkAdd() {
       .limit(1)
       .maybeSingle()
       .then(({ data }) => {
-        if (data?.cheque_number) {
-          handleAddRow(data.cheque_number)
-        } else {
-          handleAddRow()
-        }
+        if (cancelled) return
+        setRows((prev) => (prev.length > 0 ? prev : [makeRow([], data?.cheque_number)]))
       })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleAddRow = (lastDbChequeNumber?: string) => {
+  // Once the saved bank list arrives, fill in rows that don't have a bank yet.
+  useEffect(() => {
+    if (!savedBanks?.length) return
+    setRows((prev) => prev.map((r) => (r.bank_name ? r : { ...r, bank_name: savedBanks[0] })))
+  }, [savedBanks])
+
+  const makeRow = (existing: BulkRow[], lastDbChequeNumber?: string): BulkRow => {
     let newChequeNumber = ''
-    if (rows.length > 0) {
-      const lastRowNumber = rows[rows.length - 1].cheque_number
-      newChequeNumber = nextChequeNumber(lastRowNumber)
+    if (existing.length > 0) {
+      newChequeNumber = nextChequeNumber(existing[existing.length - 1].cheque_number)
     } else if (lastDbChequeNumber) {
       newChequeNumber = nextChequeNumber(lastDbChequeNumber)
     }
-
-    const newRow: BulkRow = {
+    return {
       id: crypto.randomUUID(),
       party_id: isPartyWise ? partyId! : '',
       cheque_number: newChequeNumber,
@@ -76,7 +84,10 @@ export default function BulkAdd() {
       due_date: todayISO(),
       notes: '',
     }
-    setRows((prev) => [...prev, newRow])
+  }
+
+  const handleAddRow = () => {
+    setRows((prev) => [...prev, makeRow(prev)])
   }
 
   const updateRow = (id: string, field: keyof BulkRow, value: string) => {
@@ -113,31 +124,45 @@ export default function BulkAdd() {
     }
 
     setLoading(true)
-    let added = 0
-    for (const row of rows) {
-      const result = await createCheque({
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setLoading(false)
+      toast.error('Not authenticated')
+      return
+    }
+
+    // Insert all rows in one request: either every cheque is saved or none
+    // are, so a failure never leaves the user unsure which rows made it in.
+    const { error } = await supabase.from('cheques').insert(
+      rows.map((row) => ({
+        user_id: user.id,
+        status: 'PENDING',
         party_id: row.party_id,
-        cheque_number: row.cheque_number,
+        cheque_number: row.cheque_number.trim(),
         bank_name: row.bank_name,
         amount: parseAmount(row.amount),
         issue_date: row.issue_date,
         due_date: row.due_date,
-        notes: row.notes || undefined,
-      })
-      if (result.error) {
-        toast.error(`Error saving cheque ${row.cheque_number}: ${result.error}`)
-      } else {
-        added++
-      }
-    }
+        notes: row.notes || null,
+      }))
+    )
     setLoading(false)
-    if (added > 0) {
-      toast.success(`Successfully added ${added} cheques.`)
-      navigate('/cheques')
+
+    if (error) {
+      toast.error(`Nothing was saved: ${error.message}. Your rows are still here — fix and try again.`)
+      return
     }
+    toast.success(`Successfully added ${rows.length} cheque${rows.length === 1 ? '' : 's'}.`)
+    navigate('/cheques')
   }
 
   const selectedParty = parties.find((p) => p.id === partyId)
+  const existingNumbers = useExistingChequeNumbers(rows.map((r) => r.cheque_number))
+  const rowNumberCounts = rows.reduce((m, r) => {
+    const n = r.cheque_number.trim()
+    if (n) m.set(n, (m.get(n) ?? 0) + 1)
+    return m
+  }, new Map<string, number>())
 
   return (
     <div className="space-y-4 pb-12">
@@ -205,6 +230,15 @@ export default function BulkAdd() {
                     value={row.cheque_number}
                     onChange={(e) => updateRow(row.id, 'cheque_number', e.target.value)}
                   />
+                  {(() => {
+                    const n = row.cheque_number.trim()
+                    const warning = (rowNumberCounts.get(n) ?? 0) > 1
+                      ? 'Repeated in another row'
+                      : describeExisting(existingNumbers.get(n))
+                    return warning ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">{warning}</p>
+                    ) : null
+                  })()}
                 </div>
 
                 <div className="space-y-1.5 lg:col-span-1">
@@ -229,19 +263,17 @@ export default function BulkAdd() {
 
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label className="text-xs">Issue Date *</Label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={row.issue_date}
-                    onChange={(e) => updateRow(row.id, 'issue_date', e.target.value)}
+                    onChange={(v) => updateRow(row.id, 'issue_date', v)}
                   />
                 </div>
 
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label className="text-xs">Due Date *</Label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={row.due_date}
-                    onChange={(e) => updateRow(row.id, 'due_date', e.target.value)}
+                    onChange={(v) => updateRow(row.id, 'due_date', v)}
                   />
                 </div>
               </div>

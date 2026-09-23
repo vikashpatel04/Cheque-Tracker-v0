@@ -25,3 +25,8 @@ dist-ssr
 
 .env
 .env.local
+
+# Local tool state
+.gemini/
+supabase/.temp/
+supabase/.branches/

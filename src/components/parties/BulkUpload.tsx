@@ -61,6 +61,7 @@ export function PartyBulkUpload({ open, onOpenChange, onComplete }: BulkUploadPr
     setSubmitting(true)
     const valid = preview.filter((r) => !r.error)
     let inserted = 0
+    const failed: string[] = []
     for (const row of valid) {
       const result = await createParty({
         name: row.name,
@@ -70,9 +71,13 @@ export function PartyBulkUpload({ open, onOpenChange, onComplete }: BulkUploadPr
         notes: row.notes || null,
         is_active: true,
       })
-      if (!result.error) inserted++
+      if (result.error) failed.push(row.name)
+      else inserted++
     }
-    toast.success(`${inserted} parties imported`)
+    if (inserted > 0) toast.success(`${inserted} parties imported`)
+    if (failed.length > 0) {
+      toast.error(`${failed.length} parties failed to import: ${failed.join(', ')}`)
+    }
     setSubmitting(false)
     setStep('upload')
     setPreview([])

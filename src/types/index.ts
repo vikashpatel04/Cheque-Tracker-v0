@@ -4,8 +4,9 @@ export type ChequeStatus =
   | 'PASSED'
   | 'RETURNED'
   | 'CANCELLED'
+  | 'WRITTEN_OFF'
 
-export type ChangedBy = 'manual' | 'auto' | 'deposit_allocation'
+export type ChangedBy = 'manual' | 'auto' | 'deposit_allocation' | 'rollback'
 
 export type AllocationSort = 'due_date_asc' | 'amount_asc' | 'amount_desc'
 
@@ -35,6 +36,14 @@ export interface Cheque {
   return_reason: string | null
   auto_transition_blocked: boolean
   notes: string | null
+  /** Date printed on the cheque, set when a returned cheque is re-presented with a new due_date. */
+  original_due_date: string | null
+  /** Times this cheque was returned and re-presented. */
+  represent_count: number
+  /** Reason given when the cheque was written off (status WRITTEN_OFF). */
+  write_off_reason: string | null
+  /** For a new cheque issued in place of a written-off one. */
+  replaces_cheque_id: string | null
   deleted_at: string | null
   created_at: string
   updated_at: string
@@ -49,6 +58,8 @@ export interface ChequeHistory {
   changed_by: ChangedBy
   note: string | null
   created_at: string
+  /** Set on rollback rows: the history row that was undone. */
+  reverts_history_id?: string | null
   cheque?: Cheque & { party?: Party }
 }
 
@@ -93,10 +104,30 @@ export interface AllocationCheque extends Cheque {
   selected: boolean
 }
 
+/**
+ * Forward status changes available from the generic status actions.
+ * RETURNED has dedicated actions instead (re-present / write off), and any
+ * change can be undone with rollback.
+ */
 export const VALID_STATUS_TRANSITIONS: Record<ChequeStatus, ChequeStatus[]> = {
   PENDING: ['DEPOSITED', 'RETURNED', 'CANCELLED'],
   DEPOSITED: ['PASSED', 'RETURNED', 'CANCELLED'],
   PASSED: [],
   RETURNED: [],
   CANCELLED: [],
+  WRITTEN_OFF: [],
 }
+
+export const ALL_STATUSES: ChequeStatus[] = ['PENDING', 'DEPOSITED', 'PASSED', 'RETURNED', 'CANCELLED', 'WRITTEN_OFF']
+
+export const STATUS_LABELS: Record<ChequeStatus, string> = {
+  PENDING: 'Pending',
+  DEPOSITED: 'Deposited',
+  PASSED: 'Passed',
+  RETURNED: 'Returned',
+  CANCELLED: 'Cancelled',
+  WRITTEN_OFF: 'Written Off',
+}
+
+/** Statuses where the cheque is finished — no due-date countdown. */
+export const CLOSED_STATUSES: ChequeStatus[] = ['PASSED', 'RETURNED', 'CANCELLED', 'WRITTEN_OFF']

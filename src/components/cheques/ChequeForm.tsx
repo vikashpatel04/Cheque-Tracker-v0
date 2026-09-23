@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
+import { DateInput } from '@/components/ui/date-picker'
+import { useExistingChequeNumbers, describeExisting } from '@/hooks/useExistingChequeNumbers'
 import { STATUS_ACTION_META } from './StatusActions'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
@@ -16,6 +18,7 @@ import { supabase } from '@/lib/supabase'
 import type { Cheque, ChequeStatus } from '@/types'
 import { VALID_STATUS_TRANSITIONS } from '@/types'
 import { useState, useEffect, useMemo } from 'react'
+import { toast } from 'sonner'
 
 const chequeSchema = z.object({
   party_id: z.string().min(1, 'Party is required'),
@@ -34,11 +37,14 @@ interface ChequeFormProps {
   onOpenChange: (open: boolean) => void
   cheque?: Cheque | null
   prefill?: Partial<ChequeFormData>
-  onSubmit: (data: ChequeFormData) => Promise<void>
+  /** Return false when saving failed (caller shows the error) to keep the form open. */
+  onSubmit: (data: ChequeFormData) => Promise<boolean | void>
   onStatusChange?: () => void
+  /** Set when issuing a new cheque in place of a written-off one (shown as a note). */
+  replacing?: Pick<Cheque, 'cheque_number' | 'write_off_reason'> | null
 }
 
-export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onStatusChange }: ChequeFormProps) {
+export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onStatusChange, replacing }: ChequeFormProps) {
   const { parties } = useParties()
   const { banks } = useSettings()
   const [newStatus, setNewStatus] = useState<ChequeStatus | ''>('')
@@ -97,6 +103,9 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
   }, [open, cheque, prefill, reset, setValue])
 
   const partyId = watch('party_id')
+  const chequeNumber = watch('cheque_number') ?? ''
+  const existingNumbers = useExistingChequeNumbers(open ? [chequeNumber] : [], cheque?.id)
+  const duplicateWarning = describeExisting(existingNumbers.get(chequeNumber.trim()))
 
   const partyOptions = useMemo<ComboboxOption[]>(
     () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.bank_name ?? undefined })),
@@ -105,16 +114,25 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
   const validTransitions = cheque ? VALID_STATUS_TRANSITIONS[cheque.status] : []
 
   const handleFormSubmit = async (data: ChequeFormData) => {
-    if (cheque && newStatus && newStatus !== cheque.status) {
-      if (newStatus === 'RETURNED' && !returnReason.trim()) return
+    const statusChanging = cheque && newStatus && newStatus !== cheque.status
+    if (statusChanging && newStatus === 'RETURNED' && !returnReason.trim()) return
+
+    // Save the field edits first so a failed save never leaves a half-applied
+    // status change behind.
+    const saved = await onSubmit(data)
+    if (saved === false) return
+
+    if (cheque && statusChanging) {
       const result = await updateChequeStatus(cheque.id, newStatus, {
         changedBy: 'manual',
         returnReason: newStatus === 'RETURNED' ? returnReason : undefined,
       })
-      if (!result.success) return
+      if (!result.success) {
+        toast.error(`Cheque saved, but status change failed: ${result.error ?? 'unknown error'}`)
+        return
+      }
       onStatusChange?.()
     }
-    await onSubmit(data)
     onOpenChange(false)
   }
 
@@ -125,6 +143,15 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
           <SheetTitle>{cheque ? 'Edit Cheque' : 'Add Cheque'}</SheetTitle>
         </SheetHeader>
         <form onSubmit={handleSubmit(handleFormSubmit)} className="mt-6 space-y-4">
+          {!cheque && replacing && (
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              New cheque in place of written-off cheque <span className="font-medium">#{replacing.cheque_number}</span>
+              {replacing.write_off_reason && (
+                <span className="text-muted-foreground"> ({replacing.write_off_reason})</span>
+              )}
+              . Details are pre-filled — enter the new cheque number and dates.
+            </div>
+          )}
           <div>
             <Label htmlFor="party_id">Party *</Label>
             <Combobox
@@ -142,6 +169,9 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
             <Label htmlFor="cheque_number">Cheque Number *</Label>
             <Input id="cheque_number" {...register('cheque_number')} />
             {errors.cheque_number && <p className="text-sm text-destructive">{errors.cheque_number.message}</p>}
+            {!errors.cheque_number && duplicateWarning && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{duplicateWarning}</p>
+            )}
           </div>
           <div>
             <Label htmlFor="bank_name">Bank Name *</Label>
@@ -174,19 +204,19 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="issue_date">Issue Date *</Label>
-              <Input
+              <DateInput
                 id="issue_date"
-                type="date"
-                {...register('issue_date')}
+                value={watch('issue_date')}
+                onChange={(v) => setValue('issue_date', v, { shouldValidate: true })}
               />
               {errors.issue_date && <p className="text-sm text-destructive">{errors.issue_date.message}</p>}
             </div>
             <div>
               <Label htmlFor="due_date">Due Date *</Label>
-              <Input
+              <DateInput
                 id="due_date"
-                type="date"
-                {...register('due_date')}
+                value={watch('due_date')}
+                onChange={(v) => setValue('due_date', v, { shouldValidate: true })}
               />
               {errors.due_date && <p className="text-sm text-destructive">{errors.due_date.message}</p>}
             </div>

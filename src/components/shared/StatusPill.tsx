@@ -1,4 +1,4 @@
-import type { ChequeStatus } from '@/types'
+import { STATUS_LABELS, type ChequeStatus } from '@/types'
 import { cn } from '@/lib/utils'
 
 const statusStyles: Record<ChequeStatus, string> = {
@@ -7,6 +7,7 @@ const statusStyles: Record<ChequeStatus, string> = {
   PASSED: 'bg-gray-100 text-gray-700 border-gray-200',
   RETURNED: 'bg-red-100 text-red-800 border-red-200',
   CANCELLED: 'bg-slate-100 text-slate-700 border-slate-200',
+  WRITTEN_OFF: 'bg-zinc-100 text-zinc-700 border-zinc-300 line-through decoration-zinc-400',
 }
 
 interface StatusPillProps {
@@ -23,7 +24,7 @@ export function StatusPill({ status, className }: StatusPillProps) {
         className
       )}
     >
-      {status.charAt(0) + status.slice(1).toLowerCase()}
+      {STATUS_LABELS[status] ?? status}
     </span>
   )
 }

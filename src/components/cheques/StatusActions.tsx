@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react'
-import { ArrowDownToLine, Ban, CheckCheck, CheckCircle2, Clock, RotateCcw } from 'lucide-react'
+import { ArrowDownToLine, Ban, CheckCheck, CheckCircle2, Clock, FileX, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -34,6 +34,7 @@ export const STATUS_ACTION_META: Record<ChequeStatus, StatusMeta> = {
     tone: 'text-destructive focus:text-destructive hover:text-destructive',
   },
   CANCELLED: { label: 'Cancelled', Icon: Ban, tone: 'text-muted-foreground' },
+  WRITTEN_OFF: { label: 'Written Off', Icon: FileX, tone: 'text-muted-foreground' },
 }
 
 /**

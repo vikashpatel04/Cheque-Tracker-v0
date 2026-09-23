@@ -22,11 +22,13 @@ export function useSettings() {
       return
     }
 
-    let { data, error } = await supabase
+    const result = await supabase
       .from('settings')
       .select('*')
       .eq('user_id', user.id)
       .single()
+    const { error } = result
+    let { data } = result
 
     if (error && error.code === 'PGRST116') {
       const { data: newSettings } = await supabase

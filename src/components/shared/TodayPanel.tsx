@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
-import { getOverdueTag, OVERDUE_TAG_LABELS, OVERDUE_TAG_CLASSES } from '@/lib/chequeTags'
+import { getChequeTags, getOverdueTag, OVERDUE_TAG_LABELS, OVERDUE_TAG_CLASSES } from '@/lib/chequeTags'
 import type { Cheque } from '@/types'
 
 interface TodayPanelProps {
@@ -179,6 +179,7 @@ interface ChequeRowProps {
 
 function ChequeRow({ cheque, currencySymbol, onSelect, showOverdueTag }: ChequeRowProps) {
   const overdueTag = showOverdueTag ? getOverdueTag(cheque) : null
+  const tags = getChequeTags(cheque)
 
   return (
     <button
@@ -193,6 +194,15 @@ function ChequeRow({ cheque, currencySymbol, onSelect, showOverdueTag }: ChequeR
         <p className="text-xs text-muted-foreground">
           #{cheque.cheque_number} · {cheque.bank_name}
         </p>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {tags.map((tag) => (
+              <span key={tag.key} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${tag.className}`}>
+                {tag.label}
+              </span>
+            ))}
+          </div>
+        )}
         {overdueTag && (
           <p className="text-xs text-orange-600 dark:text-orange-400 mt-0.5 flex items-center gap-1">
             <Calendar className="h-3 w-3" />

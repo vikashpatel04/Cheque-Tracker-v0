@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { formatDate } from './formatters'
 import { formatCurrency } from './formatters'
-import type { Cheque, Party, ChequeHistory, DailyDeposit } from '@/types'
+import { STATUS_LABELS, type Cheque, type Party, type ChequeHistory, type DailyDeposit } from '@/types'
 
 interface ExportCheque extends Cheque {
   party?: Party
@@ -25,7 +25,7 @@ export function exportChequesToPDF(
     formatCurrency(Number(c.amount), currencySymbol),
     formatDate(c.issue_date),
     formatDate(c.due_date),
-    c.status,
+    STATUS_LABELS[c.status] ?? c.status,
   ])
 
   autoTable(doc, {
@@ -50,7 +50,7 @@ export function exportChequesToExcel(cheques: ExportCheque[], filename: string) 
     Amount: Number(c.amount),
     'Issue Date': formatDate(c.issue_date),
     'Due Date': formatDate(c.due_date),
-    Status: c.status,
+    Status: STATUS_LABELS[c.status] ?? c.status,
     Notes: c.notes ?? '',
   }))
 
@@ -93,7 +93,10 @@ export function exportAllData(
         Amount: Number(c.amount),
         'Issue Date': formatDate(c.issue_date),
         'Due Date': formatDate(c.due_date),
-        Status: c.status,
+        Status: STATUS_LABELS[c.status] ?? c.status,
+        'Cheque Date': c.original_due_date ? formatDate(c.original_due_date) : '',
+        'Times Re-presented': c.represent_count ?? 0,
+        'Write-off Reason': c.write_off_reason ?? '',
         Notes: c.notes,
       }))
     ),

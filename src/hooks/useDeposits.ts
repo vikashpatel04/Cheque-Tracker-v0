@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { todayISO } from '@/lib/formatters'
+import { recordDeposit } from '@/lib/updateChequeStatus'
 import type { DailyDeposit } from '@/types'
 
 export function useDeposits() {
@@ -35,26 +36,14 @@ export function useDeposits() {
     fetchAllDeposits()
   }, [fetchTodayTotal, fetchAllDeposits])
 
-  const addDeposit = async (amount: number, notes?: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { error: 'Not authenticated' }
-
-    const { data, error } = await supabase
-      .from('daily_deposits')
-      .insert({
-        user_id: user.id,
-        amount,
-        deposit_date: todayISO(),
-        notes: notes ?? null,
-      })
-      .select()
-      .single()
-
-    if (!error) {
+  /** Log today's deposit and mark the allocated cheques DEPOSITED, atomically. */
+  const addDeposit = async (amount: number, chequeIds: string[], notes?: string) => {
+    const result = await recordDeposit(amount, todayISO(), chequeIds, notes)
+    if (result.success) {
       await fetchTodayTotal()
       await fetchAllDeposits()
     }
-    return { data, error: error?.message }
+    return { error: result.error }
   }
 
   return { todayTotal, deposits, loading, addDeposit, fetchTodayTotal, fetchAllDeposits }

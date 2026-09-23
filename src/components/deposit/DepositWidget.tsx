@@ -27,35 +27,35 @@ export function DepositWidget() {
     setShowAllocation(true)
   }
 
-  const handleAllocationComplete = async (selectedIds: string[]) => {
-    await addDeposit(pendingAmount, notes || undefined)
-    setShowAllocation(false)
+  const handleAllocationConfirm = async (selectedIds: string[]) => {
+    const result = await addDeposit(pendingAmount, selectedIds, notes || undefined)
+    if (result.error) return result
     setAmount('')
     setNotes('')
     setPendingAmount(0)
-    return selectedIds
+    return {}
   }
 
   return (
     <>
       <div className="flex items-center gap-2">
         <div className="rounded-lg border bg-card px-3 py-1.5 text-sm font-medium">
-          Bank: {formatCurrency(todayTotal, currencySymbol)}
+          <span className="text-muted-foreground font-normal">Funds added today:</span> {formatCurrency(todayTotal, currencySymbol)}
         </div>
         <Button size="sm" onClick={() => setShowAmountModal(true)} className="gap-1">
           <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">Deposited</span>
+          <span className="hidden sm:inline">Add funds</span>
         </Button>
       </div>
 
       <Dialog open={showAmountModal} onOpenChange={setShowAmountModal}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enter Deposit Amount</DialogTitle>
+            <DialogTitle>Add funds to bank</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="amount">Amount available in bank today</Label>
+              <Label htmlFor="amount">Amount added to the bank today</Label>
               <Input
                 id="amount"
                 type="number"
@@ -84,9 +84,8 @@ export function DepositWidget() {
       {showAllocation && (
         <AllocationModal
           depositAmount={pendingAmount}
-          notes={notes}
           onClose={() => setShowAllocation(false)}
-          onComplete={handleAllocationComplete}
+          onConfirm={handleAllocationConfirm}
         />
       )}
     </>

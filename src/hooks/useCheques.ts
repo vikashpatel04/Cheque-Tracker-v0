@@ -67,6 +67,7 @@ export function useCheques(filters?: ChequeFilters) {
     issue_date: string
     due_date: string
     notes?: string
+    replaces_cheque_id?: string
   }) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'Not authenticated' }
