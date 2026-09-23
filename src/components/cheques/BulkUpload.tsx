@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { downloadChequeTemplate, parseExcelFile } from '@/lib/exportUtils'
 import { useParties } from '@/hooks/useParties'
 import { supabase } from '@/lib/supabase'
+import { useExistingChequeNumbers, describeExisting } from '@/hooks/useExistingChequeNumbers'
 import { parseFlexibleDate, toISODate } from '@/lib/formatters'
 import { toast } from 'sonner'
 
@@ -34,6 +35,7 @@ export function ChequeBulkUpload({ open, onOpenChange, onComplete }: BulkUploadP
   const [step, setStep] = useState<'upload' | 'preview'>('upload')
   const [submitting, setSubmitting] = useState(false)
 
+  const existingNumbers = useExistingChequeNumbers(preview.map((r) => r.cheque_number))
   const partyMap = new Map(parties.map((p) => [p.name.toLowerCase(), p.id]))
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -155,7 +157,17 @@ export function ChequeBulkUpload({ open, onOpenChange, onComplete }: BulkUploadP
                     <TableCell className="p-2">{row.party_name}</TableCell>
                     <TableCell className="p-2">{row.cheque_number}</TableCell>
                     <TableCell className="p-2">{row.amount}</TableCell>
-                    <TableCell className="p-2 text-destructive text-xs">{row.error ?? 'Valid'}</TableCell>
+                    <TableCell className="p-2 text-xs">
+                      {row.error ? (
+                        <span className="text-destructive">{row.error}</span>
+                      ) : describeExisting(existingNumbers.get(row.cheque_number)) ? (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {describeExisting(existingNumbers.get(row.cheque_number))}
+                        </span>
+                      ) : (
+                        'Valid'
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

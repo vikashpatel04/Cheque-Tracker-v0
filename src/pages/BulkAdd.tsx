@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
 import { DateInput } from '@/components/ui/date-picker'
+import { useExistingChequeNumbers, describeExisting } from '@/hooks/useExistingChequeNumbers'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
 import { todayISO, formatAmountInput, parseAmount, nextChequeNumber } from '@/lib/formatters'
@@ -156,6 +157,12 @@ export default function BulkAdd() {
   }
 
   const selectedParty = parties.find((p) => p.id === partyId)
+  const existingNumbers = useExistingChequeNumbers(rows.map((r) => r.cheque_number))
+  const rowNumberCounts = rows.reduce((m, r) => {
+    const n = r.cheque_number.trim()
+    if (n) m.set(n, (m.get(n) ?? 0) + 1)
+    return m
+  }, new Map<string, number>())
 
   return (
     <div className="space-y-4 pb-12">
@@ -223,6 +230,15 @@ export default function BulkAdd() {
                     value={row.cheque_number}
                     onChange={(e) => updateRow(row.id, 'cheque_number', e.target.value)}
                   />
+                  {(() => {
+                    const n = row.cheque_number.trim()
+                    const warning = (rowNumberCounts.get(n) ?? 0) > 1
+                      ? 'Repeated in another row'
+                      : describeExisting(existingNumbers.get(n))
+                    return warning ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">{warning}</p>
+                    ) : null
+                  })()}
                 </div>
 
                 <div className="space-y-1.5 lg:col-span-1">

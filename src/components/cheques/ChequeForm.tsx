@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { DateInput } from '@/components/ui/date-picker'
+import { useExistingChequeNumbers, describeExisting } from '@/hooks/useExistingChequeNumbers'
 import { STATUS_ACTION_META } from './StatusActions'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
@@ -100,6 +101,9 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
   }, [open, cheque, prefill, reset, setValue])
 
   const partyId = watch('party_id')
+  const chequeNumber = watch('cheque_number') ?? ''
+  const existingNumbers = useExistingChequeNumbers(open ? [chequeNumber] : [], cheque?.id)
+  const duplicateWarning = describeExisting(existingNumbers.get(chequeNumber.trim()))
 
   const partyOptions = useMemo<ComboboxOption[]>(
     () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.bank_name ?? undefined })),
@@ -154,6 +158,9 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
             <Label htmlFor="cheque_number">Cheque Number *</Label>
             <Input id="cheque_number" {...register('cheque_number')} />
             {errors.cheque_number && <p className="text-sm text-destructive">{errors.cheque_number.message}</p>}
+            {!errors.cheque_number && duplicateWarning && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{duplicateWarning}</p>
+            )}
           </div>
           <div>
             <Label htmlFor="bank_name">Bank Name *</Label>
