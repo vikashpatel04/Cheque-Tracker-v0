@@ -47,6 +47,8 @@ export default function Dashboard() {
 
   const [cheques, setCheques] = useState<Cheque[]>([])
   const [history, setHistory] = useState<ChequeHistory[]>([])
+  // cheque_id -> when it was marked PASSED (from history), for the cleared chart
+  const [passedAt, setPassedAt] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
 
   // Cheque-level interactions
@@ -59,12 +61,16 @@ export default function Dashboard() {
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
-    const [chequesRes, historyRes] = await Promise.all([
+    const [chequesRes, historyRes, passedRes] = await Promise.all([
       supabase.from('cheques').select('*, party:parties(*)').is('deleted_at', null),
       supabase.from('cheque_history').select('*, cheque:cheques(*, party:parties(*))').order('created_at', { ascending: false }).limit(10),
+      supabase.from('cheque_history').select('cheque_id, created_at').eq('to_status', 'PASSED'),
     ])
     if (chequesRes.data) setCheques(chequesRes.data as Cheque[])
     if (historyRes.data) setHistory(historyRes.data as ChequeHistory[])
+    if (passedRes.data) {
+      setPassedAt(new Map(passedRes.data.map((h) => [h.cheque_id as string, h.created_at as string])))
+    }
     setLoading(false)
   }, [])
 
@@ -153,7 +159,10 @@ export default function Dashboard() {
         months[dueMonth].due += Number(c.amount)
       }
       if (c.status === 'PASSED') {
-        const clearMonth = (c.updated_at ?? c.due_date).slice(0, 7)
+        // Month it was actually cleared. updated_at changes on any edit, so
+        // don't use it; fall back to the due date if no history row exists.
+        const passedTs = passedAt.get(c.id)
+        const clearMonth = passedTs ? format(parseISO(passedTs), 'yyyy-MM') : c.due_date.slice(0, 7)
         if (!months[clearMonth]) months[clearMonth] = { issued: 0, due: 0, cleared: 0 }
         months[clearMonth].cleared += Number(c.amount)
       }
@@ -162,7 +171,7 @@ export default function Dashboard() {
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-6)
       .map(([month, data]) => ({ month: formatMonthLabel(month), ...data }))
-  }, [cheques, today])
+  }, [cheques, passedAt, today])
 
   const topParties = useMemo(() => {
     const parties: Record<string, { name: string; outstanding: number }> = {}
