@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react'
-import { Calendar, dateFnsLocalizer, type View } from 'react-big-calendar'
+import { Calendar, dateFnsLocalizer, type Formats, type View } from 'react-big-calendar'
 import {
   format,
   parse,
@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DayChequesDialog } from '@/components/shared/DayChequesDialog'
-import { formatCurrency } from '@/lib/formatters'
+import { formatCurrency, formatDate } from '@/lib/formatters'
 import { STATUS_COLORS } from '@/lib/chartUtils'
 import type { Cheque } from '@/types'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
@@ -26,6 +26,19 @@ const localizer = dateFnsLocalizer({
   getDay,
   locales: { 'en-IN': enIN },
 })
+
+// Day-first (Indian) formats. The library defaults are month-first
+// ("Wed Sep 23", "09/23/2026 – 10/23/2026").
+const dayFirstRange = ({ start, end }: { start: Date; end: Date }) =>
+  `${formatDate(start)} – ${formatDate(end)}`
+
+const calendarFormats: Formats = {
+  dayFormat: 'EEE dd',
+  dayHeaderFormat: 'EEEE, dd MMM',
+  dayRangeHeaderFormat: dayFirstRange,
+  agendaHeaderFormat: dayFirstRange,
+  agendaDateFormat: 'EEE, dd MMM',
+}
 
 export interface CalendarEvent {
   id: string
@@ -150,6 +163,8 @@ export function ChequeCalendar({
           <div className="cheque-calendar" style={{ height }}>
             <Calendar
               localizer={localizer}
+              culture="en-IN"
+              formats={calendarFormats}
               events={events}
               date={currentDate}
               view={view}

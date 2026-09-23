@@ -1,7 +1,6 @@
-import { format, parseISO } from 'date-fns'
 import { supabase } from './supabase'
 import { updateChequeStatus } from './updateChequeStatus'
-import { todayISO } from './formatters'
+import { formatDate, todayISO } from './formatters'
 
 /**
  * Client-side auto-transition — runs once on page load.
@@ -54,7 +53,7 @@ export async function runAutoTransition(): Promise<number> {
   for (const cheque of cheques) {
     const result = await updateChequeStatus(cheque.id, 'PASSED', {
       changedBy: 'auto',
-      note: `Auto-passed on ${format(parseISO(today), 'dd-MM-yyyy')}`,
+      note: `Auto-passed on ${formatDate(today)}`,
     })
     if (result.success) transitioned++
   }

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
+import { DateInput } from '@/components/ui/date-picker'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
 import { todayISO, formatAmountInput, parseAmount, nextChequeNumber } from '@/lib/formatters'
@@ -246,19 +247,17 @@ export default function BulkAdd() {
 
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label className="text-xs">Issue Date *</Label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={row.issue_date}
-                    onChange={(e) => updateRow(row.id, 'issue_date', e.target.value)}
+                    onChange={(v) => updateRow(row.id, 'issue_date', v)}
                   />
                 </div>
 
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label className="text-xs">Due Date *</Label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={row.due_date}
-                    onChange={(e) => updateRow(row.id, 'due_date', e.target.value)}
+                    onChange={(v) => updateRow(row.id, 'due_date', v)}
                   />
                 </div>
               </div>

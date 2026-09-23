@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
+import { DateInput } from '@/components/ui/date-picker'
 import { STATUS_ACTION_META } from './StatusActions'
 import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
@@ -185,19 +186,19 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="issue_date">Issue Date *</Label>
-              <Input
+              <DateInput
                 id="issue_date"
-                type="date"
-                {...register('issue_date')}
+                value={watch('issue_date')}
+                onChange={(v) => setValue('issue_date', v, { shouldValidate: true })}
               />
               {errors.issue_date && <p className="text-sm text-destructive">{errors.issue_date.message}</p>}
             </div>
             <div>
               <Label htmlFor="due_date">Due Date *</Label>
-              <Input
+              <DateInput
                 id="due_date"
-                type="date"
-                {...register('due_date')}
+                value={watch('due_date')}
+                onChange={(v) => setValue('due_date', v, { shouldValidate: true })}
               />
               {errors.due_date && <p className="text-sm text-destructive">{errors.due_date.message}</p>}
             </div>
