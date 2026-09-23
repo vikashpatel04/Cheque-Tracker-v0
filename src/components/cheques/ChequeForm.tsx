@@ -40,9 +40,11 @@ interface ChequeFormProps {
   /** Return false when saving failed (caller shows the error) to keep the form open. */
   onSubmit: (data: ChequeFormData) => Promise<boolean | void>
   onStatusChange?: () => void
+  /** Set when issuing a new cheque in place of a written-off one (shown as a note). */
+  replacing?: Pick<Cheque, 'cheque_number' | 'write_off_reason'> | null
 }
 
-export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onStatusChange }: ChequeFormProps) {
+export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onStatusChange, replacing }: ChequeFormProps) {
   const { parties } = useParties()
   const { banks } = useSettings()
   const [newStatus, setNewStatus] = useState<ChequeStatus | ''>('')
@@ -141,6 +143,15 @@ export function ChequeForm({ open, onOpenChange, cheque, prefill, onSubmit, onSt
           <SheetTitle>{cheque ? 'Edit Cheque' : 'Add Cheque'}</SheetTitle>
         </SheetHeader>
         <form onSubmit={handleSubmit(handleFormSubmit)} className="mt-6 space-y-4">
+          {!cheque && replacing && (
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              New cheque in place of written-off cheque <span className="font-medium">#{replacing.cheque_number}</span>
+              {replacing.write_off_reason && (
+                <span className="text-muted-foreground"> ({replacing.write_off_reason})</span>
+              )}
+              . Details are pre-filled — enter the new cheque number and dates.
+            </div>
+          )}
           <div>
             <Label htmlFor="party_id">Party *</Label>
             <Combobox

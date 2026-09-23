@@ -14,7 +14,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useDeposits } from '@/hooks/useDeposits'
 import { CurrencyTooltip } from '@/components/shared/ChartTooltip'
 import { STATUS_COLORS, CHART_COLORS, formatChartCurrency, formatMonthLabel } from '@/lib/chartUtils'
-import type { Cheque } from '@/types'
+import { STATUS_LABELS, type Cheque, type ChequeStatus } from '@/types'
 import {
   BarChart,
   Bar,
@@ -122,7 +122,7 @@ export default function Reports() {
     })
     return Object.entries(statuses).map(([status, data]) => ({
       status,
-      name: status.charAt(0) + status.slice(1).toLowerCase(),
+      name: STATUS_LABELS[status as ChequeStatus] ?? status,
       ...data,
       fill: STATUS_COLORS[status] ?? CHART_COLORS[0],
     }))

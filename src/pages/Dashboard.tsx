@@ -23,7 +23,7 @@ import { TodayPanel } from '@/components/shared/TodayPanel'
 import { Next7DaysStrip } from '@/components/shared/Next7DaysStrip'
 import { DayChequesDialog } from '@/components/shared/DayChequesDialog'
 import { STATUS_COLORS, CHART_COLORS, formatChartCurrency, formatMonthLabel } from '@/lib/chartUtils'
-import type { Cheque, ChequeHistory } from '@/types'
+import { STATUS_LABELS, type Cheque, type ChequeHistory, type ChequeStatus } from '@/types'
 import {
   BarChart,
   Bar,
@@ -138,7 +138,7 @@ export default function Dashboard() {
     })
     return Object.entries(statuses).map(([status, data]) => ({
       status,
-      name: status.charAt(0) + status.slice(1).toLowerCase(),
+      name: STATUS_LABELS[status as ChequeStatus] ?? status,
       ...data,
       fill: STATUS_COLORS[status] ?? '#6b7280',
     }))

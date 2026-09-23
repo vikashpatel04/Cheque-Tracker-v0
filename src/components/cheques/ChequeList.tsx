@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Upload, Search, Download, FileText, Pencil, ArrowUp, ArrowDown, MoreVertical, CheckCheck } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Plus, Upload, Search, Download, FileText, Pencil, ArrowUp, ArrowDown, MoreVertical, CheckCheck, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -20,18 +20,20 @@ import { useParties } from '@/hooks/useParties'
 import { useSettings } from '@/hooks/useSettings'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { exportChequesToPDF, exportChequesToExcel } from '@/lib/exportUtils'
-import { extractTags, TAG_LABELS, TAG_CLASSES } from '@/lib/chequeTags'
+import { getChequeTags } from '@/lib/chequeTags'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { DaysUntilDue } from '@/components/shared/DaysUntilDue'
 import { ChequeForm } from './ChequeForm'
 import { ChequeDetail } from './ChequeDetail'
 import { ChequeBulkUpload } from './BulkUpload'
+import { useRollbackAction } from './RollbackDialog'
+import { supabase } from '@/lib/supabase'
+import { isLegacyRepresented } from '@/lib/chequeTags'
 import { useChequeStatusActions, STATUS_ACTION_META, canChainDepositedAndPassed } from './StatusActions'
 import type { Cheque, ChequeStatus } from '@/types'
-import { VALID_STATUS_TRANSITIONS } from '@/types'
+import { ALL_STATUSES, STATUS_LABELS, VALID_STATUS_TRANSITIONS } from '@/types'
 import { toast } from 'sonner'
 
-const ALL_STATUSES: ChequeStatus[] = ['PENDING', 'DEPOSITED', 'PASSED', 'RETURNED', 'CANCELLED']
 
 type SortKey = 'due_date' | 'issue_date' | 'amount' | 'party_name'
 type SortDir = 'asc' | 'desc'
@@ -48,6 +50,9 @@ export function ChequeList() {
   const [bulkOpen, setBulkOpen] = useState(false)
   const [editCheque, setEditCheque] = useState<Cheque | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Issuing a new cheque in place of a written-off one (?replace=<id>)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [replacing, setReplacing] = useState<Cheque | null>(null)
 
   const filters = useMemo(
     () => ({
@@ -64,6 +69,42 @@ export function ChequeList() {
   const { currencySymbol } = useSettings()
   const { requestStatus, requestChained, submitting: statusSubmitting, returnDialog } =
     useChequeStatusActions(fetchCheques)
+  const { requestRollback, rollbackDialog } = useRollbackAction(fetchCheques)
+
+  const replaceId = searchParams.get('replace')
+  useEffect(() => {
+    if (!replaceId) return
+    supabase
+      .from('cheques')
+      .select('*')
+      .eq('id', replaceId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setEditCheque(null)
+          setReplacing(data as Cheque)
+          setFormOpen(true)
+        }
+      })
+  }, [replaceId])
+
+  const replacePrefill = useMemo(
+    () =>
+      replacing
+        ? { party_id: replacing.party_id, bank_name: replacing.bank_name, amount: Number(replacing.amount), cheque_number: '' }
+        : undefined,
+    [replacing]
+  )
+
+  const closeForm = () => {
+    setFormOpen(false)
+    setEditCheque(null)
+    if (replacing) {
+      setReplacing(null)
+      searchParams.delete('replace')
+      setSearchParams(searchParams, { replace: true })
+    }
+  }
 
   const cheques = useMemo(() => {
     return [...rawCheques].sort((a, b) => {
@@ -111,7 +152,7 @@ export function ChequeList() {
       <div className="flex flex-wrap gap-2 items-center">
         {ALL_STATUSES.map((s) => (
           <Button key={s} size="sm" variant={statusFilter.includes(s) ? 'default' : 'outline'} onClick={() => toggleStatus(s)}>
-            {s.charAt(0) + s.slice(1).toLowerCase()}
+            {STATUS_LABELS[s]}
           </Button>
         ))}
         <Select value={partyFilter || 'all'} onValueChange={(v) => setPartyFilter(v === 'all' ? '' : v)}>
@@ -181,7 +222,7 @@ export function ChequeList() {
                 </TableRow>
               ) : (
                 cheques.map((c) => {
-                  const tags = extractTags(c.notes)
+                  const tags = getChequeTags(c)
                   return (
                   <TableRow key={c.id} className="cursor-pointer" onClick={() => setDetailId(c.id)}>
                     <TableCell className="p-3 font-medium">{c.cheque_number}</TableCell>
@@ -189,8 +230,8 @@ export function ChequeList() {
                       <div className="flex flex-wrap items-center gap-1">
                         <span>{c.party?.name}</span>
                         {tags.map((tag) => (
-                          <span key={tag} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_CLASSES[tag]}`}>
-                            {TAG_LABELS[tag]}
+                          <span key={tag.key} className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${tag.className}`}>
+                            {tag.label}
                           </span>
                         ))}
                       </div>
@@ -250,6 +291,14 @@ export function ChequeList() {
                             <Pencil className="h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
+                          {c.status !== 'PENDING' || c.represent_count > 0 ? (
+                            !isLegacyRepresented(c) && (
+                              <DropdownMenuItem onSelect={() => void requestRollback(c)}>
+                                <Undo2 className="h-4 w-4" />
+                                Roll back status
+                              </DropdownMenuItem>
+                            )
+                          ) : null}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -264,12 +313,14 @@ export function ChequeList() {
 
       <ChequeForm
         open={formOpen || !!editCheque}
-        onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditCheque(null) } }}
+        onOpenChange={(o) => { if (!o) closeForm() }}
         cheque={editCheque}
+        prefill={replacePrefill}
+        replacing={replacing}
         onSubmit={async (data) => {
           const { error } = editCheque
             ? await updateCheque(editCheque.id, data)
-            : await createCheque(data)
+            : await createCheque({ ...data, replaces_cheque_id: replacing?.id })
           if (error) {
             toast.error(`Failed to save cheque: ${error}`)
             return false
@@ -290,6 +341,7 @@ export function ChequeList() {
       <ChequeBulkUpload open={bulkOpen} onOpenChange={setBulkOpen} onComplete={fetchCheques} />
 
       {returnDialog}
+      {rollbackDialog}
     </div>
   )
 }

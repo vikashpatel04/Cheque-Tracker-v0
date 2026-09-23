@@ -4,6 +4,7 @@ export const STATUS_COLORS: Record<string, string> = {
   PASSED: '#6b7280',
   RETURNED: '#ef4444',
   CANCELLED: '#64748b',
+  WRITTEN_OFF: '#a1a1aa',
 }
 
 export const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899']

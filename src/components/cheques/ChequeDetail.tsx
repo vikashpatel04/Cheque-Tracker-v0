@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Undo2 } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,25 +13,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { DaysUntilDue } from '@/components/shared/DaysUntilDue'
 import { Skeleton } from '@/components/ui/skeleton'
-import { extractTags, stripTagLines, TAG_LABELS, TAG_CLASSES } from '@/lib/chequeTags'
+import { getChequeTags, isLegacyRepresented, replacementChequePath, stripTagLines } from '@/lib/chequeTags'
 import { RePresentDrawer } from './RePresentDrawer'
+import { WriteOffDialog } from './WriteOffDialog'
+import { useRollbackAction, findUndoableChange } from './RollbackDialog'
 import { ChequeStatusActions } from './StatusActions'
-import type { Cheque, ChequeHistory } from '@/types'
+import { STATUS_LABELS, type Cheque, type ChequeHistory } from '@/types'
 import { toast } from 'sonner'
+
+const CHANGED_BY_LABELS: Record<string, string> = {
+  manual: 'You',
+  auto: 'Auto-pass',
+  deposit_allocation: 'Deposit allocation',
+  rollback: 'Rolled back',
+  velo: 'Assistant',
+}
 
 interface ChequeDetailProps {
   chequeId: string | null
@@ -42,84 +44,84 @@ interface ChequeDetailProps {
 }
 
 export function ChequeDetail({ chequeId, open, onOpenChange, onEdit, onRefresh }: ChequeDetailProps) {
+  const navigate = useNavigate()
   const { currencySymbol } = useSettings()
   const [cheque, setCheque] = useState<Cheque | null>(null)
   const [history, setHistory] = useState<ChequeHistory[]>([])
+  // Replacement links: the cheque this one replaces, or the ones issued in its place.
+  const [replaces, setReplaces] = useState<Pick<Cheque, 'id' | 'cheque_number'> | null>(null)
+  const [replacedBy, setReplacedBy] = useState<Pick<Cheque, 'id' | 'cheque_number'>[]>([])
 
-  // Re-present drawer state
   const [rePresentOpen, setRePresentOpen] = useState(false)
-
-  // Write-off dialog state
   const [writeOffOpen, setWriteOffOpen] = useState(false)
-  const [writeOffNote, setWriteOffNote] = useState('')
-  const [writeOffSubmitting, setWriteOffSubmitting] = useState(false)
 
   // Delete confirmation state — replaces native confirm()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const handleConfirmWriteOff = async () => {
-    if (!cheque) return
-    const note = writeOffNote.trim()
-    if (!note) return
-    setWriteOffSubmitting(true)
-    const existingNotes = cheque.notes ?? ''
-    const updatedNotes = existingNotes.includes('[WRITTEN_OFF]')
-      ? existingNotes
-      : ['[WRITTEN_OFF]', note, stripTagLines(existingNotes)].filter(Boolean).join('\n')
-    const { error } = await supabase.from('cheques').update({ notes: updatedNotes }).eq('id', cheque.id)
-    setWriteOffSubmitting(false)
-    if (error) { toast.error('Failed to write off cheque'); return }
-    toast.success('Cheque written off')
-    setWriteOffOpen(false)
-    setWriteOffNote('')
-    setCheque({ ...cheque, notes: updatedNotes })
-    onRefresh()
-  }
+  const afterChange = () => { onRefresh(); onOpenChange(false) }
+  const { requestRollback, rollbackDialog } = useRollbackAction(afterChange)
+
+  const load = useCallback(async (id: string) => {
+    const [chequeRes, historyRes, replacedByRes] = await Promise.all([
+      supabase.from('cheques').select('*, party:parties(*)').eq('id', id).single(),
+      supabase.from('cheque_history').select('*').eq('cheque_id', id).order('created_at', { ascending: false }),
+      supabase.from('cheques').select('id, cheque_number').eq('replaces_cheque_id', id).is('deleted_at', null),
+    ])
+    const c = chequeRes.data as Cheque | null
+    if (c) setCheque(c)
+    if (historyRes.data) setHistory(historyRes.data as ChequeHistory[])
+    setReplacedBy(replacedByRes.data ?? [])
+    if (c?.replaces_cheque_id) {
+      const { data } = await supabase
+        .from('cheques')
+        .select('id, cheque_number')
+        .eq('id', c.replaces_cheque_id)
+        .maybeSingle()
+      setReplaces(data)
+    } else {
+      setReplaces(null)
+    }
+  }, [])
 
   useEffect(() => {
     if (!open) {
       setCheque(null)
       setHistory([])
+      setReplaces(null)
+      setReplacedBy([])
       setRePresentOpen(false)
       setWriteOffOpen(false)
-      setWriteOffNote('')
       setDeleteOpen(false)
       return
     }
     if (!chequeId) return
     setCheque(null)
-    supabase
-      .from('cheques')
-      .select('*, party:parties(*)')
-      .eq('id', chequeId)
-      .single()
-      .then(({ data }) => {
-        if (data) setCheque(data as Cheque)
-      })
-    supabase
-      .from('cheque_history')
-      .select('*')
-      .eq('cheque_id', chequeId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (data) setHistory(data)
-      })
-  }, [chequeId, open])
+    void load(chequeId)
+  }, [chequeId, open, load])
 
   const handleDelete = async () => {
     if (!cheque) return
     setDeleting(true)
-    await supabase
+    const { error } = await supabase
       .from('cheques')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', cheque.id)
     setDeleting(false)
+    if (error) {
+      toast.error(`Failed to delete: ${error.message}`)
+      return
+    }
     setDeleteOpen(false)
     toast.success('Cheque deleted')
     onRefresh()
     onOpenChange(false)
   }
+
+  const legacyRepresented = cheque ? isLegacyRepresented(cheque) : false
+  const canRollback = !!cheque && !legacyRepresented && !!findUndoableChange(history)
+  const tags = cheque ? getChequeTags(cheque) : []
+  const visibleNotes = cheque ? stripTagLines(cheque.notes) : ''
 
   return (
     <>
@@ -146,11 +148,11 @@ export function ChequeDetail({ chequeId, open, onOpenChange, onEdit, onRefresh }
                 <StatusPill status={cheque.status} />
                 <DaysUntilDue dueDate={cheque.due_date} status={cheque.status} />
               </div>
-              {extractTags(cheque.notes).length > 0 && (
+              {tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {extractTags(cheque.notes).map((tag) => (
-                    <span key={tag} className={`text-xs font-medium px-2 py-0.5 rounded-full ${TAG_CLASSES[tag]}`}>
-                      {TAG_LABELS[tag]}
+                  {tags.map((tag) => (
+                    <span key={tag.key} className={`text-xs font-medium px-2 py-0.5 rounded-full ${tag.className}`}>
+                      {tag.label}
                     </span>
                   ))}
                 </div>
@@ -160,29 +162,76 @@ export function ChequeDetail({ chequeId, open, onOpenChange, onEdit, onRefresh }
                 <p><span className="text-muted-foreground">Bank:</span> {cheque.bank_name}</p>
                 <p><span className="text-muted-foreground">Amount:</span> {formatCurrency(Number(cheque.amount), currencySymbol)}</p>
                 <p><span className="text-muted-foreground">Issue Date:</span> {formatDate(cheque.issue_date)}</p>
-                <p><span className="text-muted-foreground">Due Date:</span> {formatDate(cheque.due_date)}</p>
-                {cheque.return_reason && (
-                  <p><span className="text-muted-foreground">Return Reason:</span> {cheque.return_reason}</p>
+                {cheque.original_due_date && cheque.original_due_date !== cheque.due_date ? (
+                  <>
+                    <p><span className="text-muted-foreground">Cheque Date:</span> {formatDate(cheque.original_due_date)}</p>
+                    <p><span className="text-muted-foreground">Due Date (re-presented):</span> {formatDate(cheque.due_date)}</p>
+                  </>
+                ) : (
+                  <p><span className="text-muted-foreground">Due Date:</span> {formatDate(cheque.due_date)}</p>
                 )}
-                {stripTagLines(cheque.notes) && (
-                  <p><span className="text-muted-foreground">Notes:</span> {stripTagLines(cheque.notes)}</p>
+                {cheque.return_reason && (
+                  <p>
+                    <span className="text-muted-foreground">
+                      {cheque.status === 'RETURNED' ? 'Return Reason:' : 'Last Return Reason:'}
+                    </span>{' '}
+                    {cheque.return_reason}
+                  </p>
+                )}
+                {cheque.status === 'WRITTEN_OFF' && cheque.write_off_reason && (
+                  <p><span className="text-muted-foreground">Write-off Reason:</span> {cheque.write_off_reason}</p>
+                )}
+                {replaces && (
+                  <p><span className="text-muted-foreground">Replaces:</span> written-off cheque #{replaces.cheque_number}</p>
+                )}
+                {replacedBy.length > 0 && (
+                  <p>
+                    <span className="text-muted-foreground">Replaced by:</span>{' '}
+                    {replacedBy.map((r) => `#${r.cheque_number}`).join(', ')}
+                  </p>
+                )}
+                {visibleNotes && (
+                  <p><span className="text-muted-foreground">Notes:</span> {visibleNotes}</p>
                 )}
               </div>
 
-              <ChequeStatusActions
-                cheque={cheque}
-                onChanged={() => { onRefresh(); onOpenChange(false) }}
-              />
+              <ChequeStatusActions cheque={cheque} onChanged={afterChange} />
 
+              {cheque.status === 'RETURNED' && (
+                legacyRepresented ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    Re-presented earlier as a separate cheque entry (tagged "From Return").
+                  </p>
+                ) : (
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                      Returned cheque
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => setRePresentOpen(true)}>Re-present</Button>
+                      <Button size="sm" variant="outline" onClick={() => setWriteOffOpen(true)}>Write Off</Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      Re-present when the party will deposit this same cheque again. Write off if the cheque can't be used.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {cheque.status === 'WRITTEN_OFF' && replacedBy.length === 0 && (
+                <Button size="sm" variant="outline" onClick={() => navigate(replacementChequePath(cheque.id))}>
+                  Issue new cheque
+                </Button>
+              )}
 
               <div>
                 <h4 className="font-medium mb-2">Status History</h4>
                 <div className="space-y-2">
                   {history.map((h) => (
                     <div key={h.id} className="border-l-2 border-muted pl-3 py-1">
-                      <p>{h.from_status} → {h.to_status}</p>
+                      <p>{STATUS_LABELS[h.from_status] ?? h.from_status} → {STATUS_LABELS[h.to_status] ?? h.to_status}</p>
                       <p className="text-xs text-muted-foreground">
-                        {h.changed_by} · {formatDateTime(h.created_at)}
+                        {CHANGED_BY_LABELS[h.changed_by] ?? h.changed_by} · {formatDateTime(h.created_at)}
                       </p>
                       {h.note && <p className="text-xs">{h.note}</p>}
                     </div>
@@ -190,20 +239,14 @@ export function ChequeDetail({ chequeId, open, onOpenChange, onEdit, onRefresh }
                 </div>
               </div>
 
-              {cheque.status === 'RETURNED' && (() => {
-                const tags = extractTags(cheque.notes)
-                const isWrittenOff = tags.includes('WRITTEN_OFF')
-                const isRePresentedTag = tags.includes('RE_PRESENTED')
-                return !isWrittenOff && !isRePresentedTag ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => setRePresentOpen(true)}>Re-present</Button>
-                    <Button size="sm" variant="outline" onClick={() => { setWriteOffNote(''); setWriteOffOpen(true) }}>Write Off</Button>
-                  </div>
-                ) : null
-              })()}
-
-              <div className="flex gap-2 pt-4">
+              <div className="flex flex-wrap gap-2 pt-4">
                 <Button variant="outline" onClick={() => onEdit(cheque)}>Edit</Button>
+                {canRollback && (
+                  <Button variant="outline" onClick={() => void requestRollback(cheque)}>
+                    <Undo2 className="h-4 w-4" />
+                    Roll back
+                  </Button>
+                )}
                 <Button variant="destructive" onClick={() => setDeleteOpen(true)}>Delete</Button>
               </div>
             </div>
@@ -211,42 +254,21 @@ export function ChequeDetail({ chequeId, open, onOpenChange, onEdit, onRefresh }
         </SheetContent>
       </Sheet>
 
-      {/* Re-present drawer */}
       <RePresentDrawer
         cheque={cheque}
         open={rePresentOpen}
-        onOpenChange={(o) => setRePresentOpen(o)}
-        onSuccess={() => { setRePresentOpen(false); onRefresh(); onOpenChange(false) }}
+        onOpenChange={setRePresentOpen}
+        onSuccess={afterChange}
       />
 
-      {/* Write-off dialog */}
-      <Dialog open={writeOffOpen} onOpenChange={(o) => { if (writeOffSubmitting) return; if (!o) { setWriteOffOpen(false); setWriteOffNote('') } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Write off cheque {cheque ? `#${cheque.cheque_number}` : ''}</DialogTitle>
-            <DialogDescription>
-              Add a write-off reason. The cheque will be tagged as <span className="font-medium">Written Off</span> and actions will be disabled.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Label htmlFor="detail-writeoff-note">Reason *</Label>
-            <Textarea
-              id="detail-writeoff-note"
-              value={writeOffNote}
-              onChange={(e) => setWriteOffNote(e.target.value)}
-              placeholder="e.g. Party closed business, marked unrecoverable..."
-              rows={3}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setWriteOffOpen(false); setWriteOffNote('') }} disabled={writeOffSubmitting}>Cancel</Button>
-            <Button variant="destructive" onClick={handleConfirmWriteOff} disabled={!writeOffNote.trim() || writeOffSubmitting}>
-              {writeOffSubmitting ? 'Saving...' : 'Write Off'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <WriteOffDialog
+        cheque={cheque}
+        open={writeOffOpen}
+        onOpenChange={setWriteOffOpen}
+        onSuccess={afterChange}
+      />
+
+      {rollbackDialog}
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteOpen} onOpenChange={(o) => !deleting && setDeleteOpen(o)}>

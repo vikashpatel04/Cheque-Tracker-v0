@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DayChequesDialog } from '@/components/shared/DayChequesDialog'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { STATUS_COLORS } from '@/lib/chartUtils'
-import type { Cheque } from '@/types'
+import { STATUS_LABELS, type Cheque, type ChequeStatus } from '@/types'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 
 const localizer = dateFnsLocalizer({
@@ -153,7 +153,7 @@ export function ChequeCalendar({
                 .map(([status, color]) => (
                   <span key={status} className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                    {status.charAt(0) + status.slice(1).toLowerCase()}
+                    {STATUS_LABELS[status as ChequeStatus]}
                   </span>
                 ))}
             </div>

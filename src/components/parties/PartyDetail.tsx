@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Party, Cheque, ChequeStatus } from '@/types'
+import { ALL_STATUSES, STATUS_LABELS, type Party, type Cheque, type ChequeStatus } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { useSettings } from '@/hooks/useSettings'
 import { StatusPill } from '@/components/shared/StatusPill'
@@ -160,14 +160,14 @@ export function PartyDetail() {
 
       <div className="flex flex-col sm:flex-row justify-between gap-3">
         <div className="flex gap-2 flex-wrap">
-          {(['ALL', 'PENDING', 'DEPOSITED', 'PASSED', 'RETURNED', 'CANCELLED'] as const).map((s) => (
+          {(['ALL', ...ALL_STATUSES] as const).map((s) => (
             <Button
               key={s}
               variant={statusFilter === s ? 'default' : 'outline'}
               size="sm"
               onClick={() => setStatusFilter(s)}
             >
-              {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+              {s === 'ALL' ? 'All' : STATUS_LABELS[s]}
             </Button>
           ))}
         </div>

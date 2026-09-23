@@ -47,3 +47,48 @@ export async function recordDeposit(
   }
   return { success: true }
 }
+
+/**
+ * Re-present a returned cheque: the same cheque goes back to PENDING with a
+ * new due date (or straight on to DEPOSITED when markDeposited is set).
+ */
+export async function representCheque(
+  chequeId: string,
+  newDueDate: string,
+  options: { note?: string; markDeposited?: boolean } = {}
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('represent_cheque', {
+    p_cheque_id: chequeId,
+    p_new_due_date: newDueDate,
+    p_note: options.note ?? null,
+    p_mark_deposited: options.markDeposited ?? false,
+  })
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
+/** Close a returned cheque as WRITTEN_OFF (unusable) with a reason. */
+export async function writeOffCheque(
+  chequeId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('write_off_cheque', {
+    p_cheque_id: chequeId,
+    p_reason: reason,
+  })
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
+/** Undo the cheque's latest status change. Returns the status it went back to. */
+export async function rollbackChequeStatus(
+  chequeId: string,
+  note?: string
+): Promise<{ success: boolean; error?: string; status?: ChequeStatus }> {
+  const { data, error } = await supabase.rpc('rollback_cheque_status', {
+    p_cheque_id: chequeId,
+    p_note: note ?? null,
+  })
+  if (error) return { success: false, error: error.message }
+  return { success: true, status: data as ChequeStatus }
+}
