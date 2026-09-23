@@ -53,7 +53,9 @@ cp .env.example .env
 # Fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 
 # 4. Apply the database schema
-# Open your Supabase project → SQL Editor and run supabase/schema.sql
+# With the Supabase CLI linked to your project:
+supabase db push
+# (or run supabase/migrations/*.sql in order in the SQL Editor)
 
 # 5. Start dev server
 npm run dev

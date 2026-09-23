@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Plus, Upload, Search, Download, FileText, Pencil, ArrowUp, ArrowDown, MoreVertical, CheckCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,6 +37,7 @@ type SortKey = 'due_date' | 'issue_date' | 'amount' | 'party_name'
 type SortDir = 'asc' | 'desc'
 
 export function ChequeList() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<ChequeStatus[]>([])
   const [partyFilter, setPartyFilter] = useState('')
@@ -97,7 +99,7 @@ export function ChequeList() {
           <Button variant="outline" onClick={() => setBulkOpen(true)}>
             <Upload className="h-4 w-4 mr-1" /> Excel Upload
           </Button>
-          <Button variant="outline" onClick={() => window.location.href = '/bulk-add'}>
+          <Button variant="outline" onClick={() => navigate('/bulk-add')}>
             <Plus className="h-4 w-4 mr-1" /> Bulk Add
           </Button>
           <Button onClick={() => { setEditCheque(null); setFormOpen(true) }}>
