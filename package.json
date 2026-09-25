@@ -2,6 +2,13 @@
   "name": "cheque-tracker",
   "private": true,
   "version": "0.0.0",
+  "description": "Track post-dated cheques and see how much cash the bank needs today. React + Supabase.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vikashpatel04/Cheque-Tracker.git"
+  },
+  "bugs": "https://github.com/vikashpatel04/Cheque-Tracker/issues",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

@@ -30,3 +30,7 @@ dist-ssr
 .gemini/
 supabase/.temp/
 supabase/.branches/
+
+# /brag launch-video output (local only)
+brag-output/
+brag-output-*/

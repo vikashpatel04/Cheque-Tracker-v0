@@ -1,6 +1,6 @@
 # Cheque Tracker
 
-Personal cheque management for a retail clothing shop.
+Personal cheque management for a retail shop.
 
 ## Deploy to Vercel
 
